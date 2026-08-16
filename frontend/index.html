@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetMind AI — Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#17150F;
+    --surface:#1F1C17;
+    --surface-2:#28241D;
+    --hairline:#3C372C;
+    --text:#F1EDE4;
+    --text-dim:#A9A192;
+    --text-faint:#6E6759;
+    --amber:#3FAE7A;
+    --amber-dim:#1B2A21;
+    --green:#6FA0C9;
+    --green-dim:#1C2733;
+    --red:#C96B4A;
+    --red-dim:#2E2019;
+    --radius:10px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace;}
+  .display{font-family:'Space Grotesk', sans-serif;}
+
+  /* ---------- Top nav ---------- */
+  .topbar{
+    position:sticky; top:0; z-index:50;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 28px;
+    background:rgba(15,23,32,0.92);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--hairline);
+  }
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand-mark{
+    width:26px; height:26px; border-radius:6px;
+    background:linear-gradient(135deg, var(--amber), #1F6B46);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk'; font-weight:700; font-size:13px; color:var(--ink);
+  }
+  .brand-name{font-family:'Space Grotesk'; font-weight:600; font-size:15px; letter-spacing:0.2px;}
+  .brand-project{
+    font-size:12px; color:var(--text-dim); margin-left:6px; padding-left:12px;
+    border-left:1px solid var(--hairline);
+  }
+  .nav-tabs{display:flex; gap:2px; background:var(--surface); padding:3px; border-radius:9px; border:1px solid var(--hairline);}
+  .nav-tab{
+    font-size:12.5px; font-weight:500; color:var(--text-dim);
+    padding:7px 14px; border-radius:6px; cursor:pointer; user-select:none;
+    transition:all .15s ease; white-space:nowrap;
+  }
+  .nav-tab:hover{color:var(--text);}
+  .nav-tab.active{background:var(--surface-2); color:var(--text); box-shadow:inset 0 0 0 1px var(--hairline);}
+  .topbar-right{display:flex; align-items:center; gap:10px;}
+  .avatar{
+    width:28px; height:28px; border-radius:50%; background:var(--surface-2);
+    border:1px solid var(--hairline); display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk'; font-size:11px; font-weight:600; color:var(--amber);
+  }
+
+  main{max-width:1180px; margin:0 auto; padding:36px 28px 80px;}
+  .screen{display:none; animation:fadeUp .35s ease;}
+  .screen.active{display:block;}
+  @keyframes fadeUp{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+
+  /* ---------- shared ---------- */
+  .eyebrow{font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-faint); font-weight:600;}
+  .card{
+    background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius);
+    padding:22px;
+  }
+  .pill{
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:12px; font-weight:500; padding:5px 11px; border-radius:20px;
+    border:1px solid var(--hairline);
+  }
+  .dot{width:6px; height:6px; border-radius:50%;}
+  .btn{
+    font-family:'Inter'; font-size:13px; font-weight:600; padding:11px 20px; border-radius:8px;
+    border:none; cursor:pointer; transition:all .15s ease;
+  }
+  .btn-primary{background:var(--amber); color:#1a1305;}
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-ghost{background:transparent; border:1px solid var(--hairline); color:var(--text);}
+  .btn-ghost:hover{background:var(--surface-2);}
+
+  /* ================= SCREEN 1: DASHBOARD ================= */
+  .dash-header{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:28px;}
+  .dash-greeting{font-family:'Space Grotesk'; font-size:26px; font-weight:600;}
+  .dash-sub{color:var(--text-dim); font-size:13.5px; margin-top:4px;}
+  .status-row{display:flex; gap:12px; margin-bottom:28px;}
+  .status-card{
+    flex:1; background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius);
+    padding:18px 20px; position:relative; overflow:hidden;
+  }
+  .status-card::before{content:''; position:absolute; left:0; top:0; bottom:0; width:3px;}
+  .status-card.green::before{background:var(--green);}
+  .status-card.amber::before{background:var(--amber);}
+  .status-card.red::before{background:var(--red);}
+  .status-num{font-family:'IBM Plex Mono'; font-size:26px; font-weight:600;}
+  .status-label{font-size:12.5px; color:var(--text-dim); margin-top:2px;}
+
+  .section-title{font-family:'Space Grotesk'; font-size:15px; font-weight:600; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;}
+  .meeting-row{
+    display:flex; align-items:center; gap:16px; padding:14px 4px;
+    border-bottom:1px solid var(--hairline); cursor:pointer; transition:background .15s;
+  }
+  .meeting-row:hover{background:var(--surface-2);}
+  .meeting-row:last-child{border-bottom:none;}
+  .meeting-date{
+    font-family:'IBM Plex Mono'; font-size:11px; color:var(--text-dim); width:64px; flex-shrink:0;
+    display:flex; flex-direction:column; align-items:center; background:var(--surface-2);
+    border-radius:6px; padding:6px 4px; border:1px solid var(--hairline);
+  }
+  .meeting-date b{font-family:'Space Grotesk'; font-size:16px; color:var(--text); font-weight:600;}
+  .meeting-info{flex:1;}
+  .meeting-title{font-size:13.5px; font-weight:500;}
+  .meeting-meta{font-size:12px; color:var(--text-dim); margin-top:2px;}
+  .meeting-flag{font-size:11px; padding:3px 9px; border-radius:12px; font-weight:600;}
+
+  /* ================= SCREEN 2: CAPTURE ================= */
+  .capture-grid{display:grid; grid-template-columns:1fr 1.6fr; gap:22px;}
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.35;}}
+  .participant-chip{
+    display:inline-flex; align-items:center; gap:6px; background:var(--surface-2);
+    border:1px solid var(--hairline); border-radius:20px; padding:5px 12px 5px 6px; font-size:12.5px; margin:3px 6px 3px 0;
+  }
+  .chip-avatar{width:18px; height:18px; border-radius:50%; background:var(--amber); color:#1a1305; font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk';}
+  .chip-remove{margin-left:4px; cursor:pointer; color:var(--text-faint); font-size:10px; padding:2px;}
+  .chip-remove:hover{color:var(--red);}
+  .add-member-btn{margin-top:10px; width:100%; font-size:12.5px; padding:9px;}
+  .add-member-form{margin-top:10px; padding:12px; background:var(--surface-2); border:1px solid var(--hairline); border-radius:8px; display:flex; flex-direction:column; gap:8px;}
+  .mini-input{width:100%; background:var(--ink); border:1px solid var(--hairline); border-radius:6px; padding:9px 10px; font-size:12.5px; color:var(--text); font-family:'Inter'; box-sizing:border-box;}
+  .mini-input:focus{outline:none; border-color:var(--amber);}
+  .mini-input::placeholder{color:var(--text-faint);}
+
+  .recorder-card{min-height:380px; display:flex; align-items:center; justify-content:center;}
+  .capture-state{display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; width:100%; padding:10px;}
+  .recorder-frame{width:100%; border-radius:12px; padding:40px 20px; margin-bottom:20px; border:1px solid var(--hairline); background:var(--surface-2); display:flex; flex-direction:column; align-items:center; gap:10px;}
+  .camera-icon{font-size:32px; opacity:0.8;}
+  .recorder-hint{font-size:12.5px; color:var(--text-dim); max-width:320px; line-height:1.5;}
+  .record-btn{padding:13px 28px; font-size:14px;}
+
+  .recorder-frame.live{border-color:var(--red); background:var(--red-dim);}
+  .rec-dot{width:8px; height:8px; border-radius:50%; background:var(--red); animation:pulse 1.2s infinite;}
+
+  .preview-box{
+    position:relative; width:100%; aspect-ratio:16/9; border-radius:12px; margin-bottom:16px;
+    border:1.5px solid var(--red); background:radial-gradient(ellipse at center, var(--surface-2) 0%, var(--ink) 100%);
+    overflow:hidden; transition:border-color .3s ease, box-shadow .3s ease;
+  }
+  .preview-box.flash{border-color:var(--amber); box-shadow:0 0 0 3px var(--amber-dim);}
+  .rec-overlay{
+    position:absolute; top:10px; left:10px; display:flex; align-items:center; gap:7px;
+    background:rgba(0,0,0,0.45); backdrop-filter:blur(2px); padding:5px 10px; border-radius:6px;
+    font-size:11.5px; font-weight:600; color:var(--text); z-index:2;
+  }
+  .preview-placeholder{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:8px; font-size:30px; color:var(--text-faint); opacity:0.5;
+  }
+  .preview-placeholder span{font-size:11.5px; font-family:'Inter'; letter-spacing:0.3px;}
+  .scan-badge{
+    position:absolute; bottom:10px; left:10px; right:10px; text-align:center;
+    background:rgba(0,0,0,0.45); backdrop-filter:blur(2px); padding:6px 10px; border-radius:6px;
+    font-size:11px; color:var(--text-dim); z-index:2;
+  }
+  .capture-meta{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px;}
+  .waveform{display:flex; align-items:flex-end; gap:3px; height:26px;}
+  .waveform span{width:3px; background:var(--red); border-radius:2px; animation:wave 1s ease-in-out infinite;}
+  .waveform span:nth-child(1){animation-delay:0s;}
+  .waveform span:nth-child(2){animation-delay:.12s;}
+  .waveform span:nth-child(3){animation-delay:.24s;}
+  .waveform span:nth-child(4){animation-delay:.36s;}
+  .waveform span:nth-child(5){animation-delay:.24s;}
+  .waveform span:nth-child(6){animation-delay:.12s;}
+  .waveform span:nth-child(7){animation-delay:0s;}
+  @keyframes wave{0%,100%{height:6px;} 50%{height:24px;}}
+  .frame-counter{font-size:12px; color:var(--text-dim); font-family:'IBM Plex Mono';}
+  .frame-counter span{color:var(--amber); font-weight:600;}
+  .detect-toast{
+    font-size:12px; font-weight:500; color:var(--amber); background:var(--amber-dim); border:1px solid var(--hairline);
+    border-radius:8px; padding:0 12px; max-height:0; opacity:0; overflow:hidden;
+    transition:all .3s ease; margin-bottom:0;
+  }
+  .detect-toast.show{padding:9px 12px; max-height:40px; opacity:1; margin-bottom:14px;}
+  .end-btn{border-color:var(--red); color:var(--red);}
+  .end-btn:hover{background:var(--red-dim);}
+
+  .processing-frame{width:100%; text-align:left;}
+  .processing-header{display:flex; align-items:center; gap:10px; font-family:'Space Grotesk'; font-weight:600; font-size:14px; margin-bottom:20px;}
+  .pulse-mini{width:8px; height:8px; border-radius:50%; background:var(--amber); animation:pulse 1.2s infinite; flex-shrink:0;}
+  .checklist{margin-bottom:20px;}
+  .check-item{display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; color:var(--text-faint); opacity:0; transform:translateY(4px); transition:all .3s ease;}
+  .check-item.show{opacity:1; transform:translateY(0); color:var(--text);}
+  .check-item .tick{width:16px; height:16px; border-radius:50%; border:1.5px solid var(--hairline); display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0; color:transparent; transition:all .3s ease;}
+  .check-item.show .tick{border-color:var(--amber); background:var(--amber-dim); color:var(--amber);}
+  .progress-track{height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; margin-bottom:6px;}
+  .progress-fill{height:100%; width:0%; background:var(--amber); transition:width .3s ease;}
+  .progress-pct{font-size:11px; color:var(--text-dim); text-align:right;}
+
+  .processed-frame{width:100%; text-align:left; animation:fadeUp .35s ease;}
+  .processed-header{display:flex; align-items:center; gap:10px; font-family:'Space Grotesk'; font-weight:600; font-size:16px; margin-bottom:20px;}
+  .processed-check{width:22px; height:22px; border-radius:50%; background:var(--amber); color:var(--ink); font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+
+  /* ================= SCREEN 3: SUMMARY ================= */
+  .summary-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px;}
+  .field-callouts{display:flex; gap:12px; margin-top:20px;}
+  .callout{flex:1; background:var(--surface-2); border:1px solid var(--hairline); border-radius:8px; padding:14px 16px;}
+  .callout-label{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;}
+  .callout-value{font-family:'IBM Plex Mono'; font-size:17px; font-weight:600; margin-top:4px;}
+  .decision-item{display:flex; align-items:flex-start; gap:10px; padding:8px 0; font-size:13.5px;}
+  .check{color:var(--green); font-size:14px; margin-top:1px;}
+  .action-item{display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--hairline); font-size:13px;}
+  .action-item:last-child{border-bottom:none;}
+  .owner-tag{font-family:'IBM Plex Mono'; font-size:11.5px; background:var(--surface-2); padding:3px 8px; border-radius:5px; color:var(--amber);}
+  .intel-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
+  .intel-stat{background:var(--surface-2); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center;}
+  .intel-stat.amber{border-color:var(--amber); background:var(--amber-dim);}
+  .intel-num{font-family:'IBM Plex Mono'; font-size:22px; font-weight:600;}
+  .intel-stat.amber .intel-num{color:var(--amber);}
+  .intel-label{font-size:11px; color:var(--text-dim); margin-top:2px; text-transform:uppercase; letter-spacing:0.4px;}
+
+  /* ================= SCREEN 4: PROJECT MEMORY (signature) ================= */
+  .memory-tabs{display:flex; gap:0; border-bottom:1px solid var(--hairline); margin-bottom:24px;}
+  .mem-tab{padding:10px 4px; margin-right:26px; font-size:13.5px; font-weight:500; color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; position:relative; top:1px;}
+  .mem-tab.active{color:var(--text); border-bottom-color:var(--amber);}
+
+  .ledger{display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px;}
+  .field-ledger{background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius); padding:20px;}
+  .fl-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;}
+  .fl-title{font-family:'Space Grotesk'; font-size:13.5px; font-weight:600;}
+  .fl-current{font-family:'IBM Plex Mono'; font-size:19px; font-weight:600; color:var(--amber);}
+  .stmt-line{position:relative; padding-left:22px; padding-bottom:20px;}
+  .stmt-line::before{ /* connecting rail */
+    content:''; position:absolute; left:5px; top:14px; bottom:-6px; width:1px; background:var(--hairline);
+  }
+  .stmt-line:last-child::before{display:none;}
+  .stmt-node{position:absolute; left:0; top:3px; width:11px; height:11px; border-radius:50%; background:var(--ink); border:2px solid var(--text-faint);}
+  .stmt-node.changed{border-color:var(--amber); background:var(--amber-dim);}
+  .stmt-node.origin{border-color:var(--green);}
+  .stmt-month{font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px;}
+  .stmt-value{font-family:'IBM Plex Mono'; font-size:14.5px; font-weight:500;}
+  .stmt-value.was{color:var(--text-faint); text-decoration:line-through; font-size:12.5px; display:block; margin-bottom:2px;}
+  .stmt-row{cursor:pointer; border-radius:6px; margin:-4px -6px 16px -6px; padding:4px 6px; transition:background .15s;}
+  .stmt-row:hover{background:var(--surface-2);}
+  .stmt-line.changeable .stmt-value{color:var(--amber);}
+  .current-value-block{display:flex; flex-direction:column; align-items:flex-start; gap:10px; padding:18px 2px 4px; cursor:pointer; border-radius:8px; transition:background .15s;}
+  .current-value-block:hover{background:var(--surface-2);}
+  .current-value{font-size:27px; font-weight:600;}
+  .current-badge{font-size:11px; padding:4px 11px; border-radius:12px; border:1px solid var(--hairline); color:var(--text-dim);}
+  .current-badge.changed{border-color:var(--amber); color:var(--amber); background:var(--amber-dim);}
+
+  .detail-panel{
+    position:fixed; top:0; right:0; width:380px; height:100vh; background:var(--surface);
+    border-left:1px solid var(--hairline); padding:26px; transform:translateX(100%);
+    transition:transform .28s ease; z-index:100; overflow-y:auto;
+  }
+  .detail-panel.open{transform:translateX(0);}
+  .detail-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.4); opacity:0; pointer-events:none; transition:opacity .28s ease; z-index:99;}
+  .detail-overlay.open{opacity:1; pointer-events:auto;}
+  .detail-close{position:absolute; top:22px; right:22px; cursor:pointer; color:var(--text-dim); font-size:18px; background:none; border:none;}
+  .detail-eyebrow{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;}
+  .detail-change{font-family:'IBM Plex Mono'; font-size:22px; font-weight:600; margin-bottom:22px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .arrow{color:var(--text-faint); font-size:16px;}
+  .detail-block{margin-bottom:20px;}
+  .detail-block-label{font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;}
+  .detail-block-value{font-size:13.5px; line-height:1.55;}
+  .evidence-link{
+    display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--hairline);
+    border-radius:8px; padding:12px 14px; margin-top:6px; cursor:pointer;
+  }
+  .evidence-link:hover{border-color:var(--amber);}
+
+  /* ================= SCREEN 5: AI SEARCH ================= */
+  .search-wrap{max-width:720px; margin:0 auto;}
+  .search-hero{text-align:center; margin-bottom:30px;}
+  .search-hero h2{font-family:'Space Grotesk'; font-size:22px; font-weight:600; margin-bottom:6px;}
+  .search-hero p{color:var(--text-dim); font-size:13.5px;}
+  .search-bar{
+    display:flex; align-items:center; gap:12px; background:var(--surface); border:1px solid var(--hairline);
+    border-radius:12px; padding:14px 18px; margin-bottom:14px;
+  }
+  .search-bar input{
+    flex:1; background:none; border:none; outline:none; color:var(--text); font-size:14px; font-family:'Inter';
+  }
+  .search-bar input::placeholder{color:var(--text-faint);}
+  .suggest-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:26px; justify-content:center;}
+  .suggest-chip{font-size:12px; padding:6px 13px; border-radius:20px; border:1px solid var(--hairline); color:var(--text-dim); cursor:pointer;}
+  .suggest-chip:hover{border-color:var(--amber); color:var(--text);}
+
+  .qa-block{display:none;}
+  .qa-block.show{display:block; animation:fadeUp .35s ease;}
+  .user-q{
+    display:flex; justify-content:flex-end; margin-bottom:14px;
+  }
+  .user-q span{background:var(--surface-2); border:1px solid var(--hairline); border-radius:14px 14px 2px 14px; padding:10px 16px; font-size:13.5px; max-width:80%;}
+  .ai-a{display:flex; gap:12px; margin-bottom:18px;}
+  .ai-mark{width:26px; height:26px; border-radius:7px; background:var(--amber-dim); border:1px solid var(--amber); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:12px;}
+  .ai-a-text{background:var(--surface); border:1px solid var(--hairline); border-radius:2px 14px 14px 14px; padding:14px 18px; font-size:13.5px; line-height:1.6;}
+  .evidence-card{
+    margin-top:12px; margin-left:38px; background:var(--surface-2); border:1px solid var(--hairline);
+    border-radius:10px; padding:14px 16px; cursor:pointer; transition:border-color .15s;
+  }
+  .evidence-card:hover{border-color:var(--amber);}
+  .ev-source{font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;}
+  .ev-detail{display:flex; align-items:center; gap:14px; font-size:12.5px;}
+  .ev-detail span{font-family:'IBM Plex Mono'; color:var(--amber);}
+
+  .visual-evidence-card{
+    margin-top:12px; margin-left:38px; background:var(--surface-2); border:1px solid var(--hairline);
+    border-radius:10px; padding:14px 16px; cursor:pointer; transition:border-color .15s;
+  }
+  .visual-evidence-card:hover{border-color:var(--amber);}
+  .ve-body{display:flex; gap:14px; align-items:center; margin:10px 0 12px;}
+  .ve-thumb{
+    width:52px; height:52px; border-radius:8px; background:var(--surface); border:1px dashed var(--hairline);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:18px; color:var(--text-faint); flex-shrink:0; gap:2px;
+  }
+  .ve-thumb span{font-size:8px; letter-spacing:0.5px;}
+  .ve-fields{display:flex; flex-direction:column; gap:5px;}
+  .ve-field{display:flex; gap:8px; font-size:12.5px;}
+  .ve-field-label{color:var(--text-dim); width:72px; flex-shrink:0;}
+  .ve-field-value{color:var(--amber); font-weight:600;}
+  .ve-note{font-size:11px; color:var(--text-faint); border-top:1px solid var(--hairline); padding-top:9px; line-height:1.5;}
+
+  .footnote{text-align:center; color:var(--text-faint); font-size:11.5px; margin-top:60px;}
+
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--hairline); border-radius:4px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">M</div>
+    <div class="brand-name">MeetMind AI</div>
+    <div class="brand-project">FINOVA BANK &nbsp;·&nbsp; Digital Banking Revamp</div>
+  </div>
+  <div class="nav-tabs" id="navTabs">
+    <div class="nav-tab active" data-screen="dashboard">Dashboard</div>
+    <div class="nav-tab" data-screen="capture">Meeting Capture</div>
+    <div class="nav-tab" data-screen="summary">Summary</div>
+    <div class="nav-tab" data-screen="memory">Project Memory</div>
+    <div class="nav-tab" data-screen="search">AI Search</div>
+  </div>
+  <div class="topbar-right">
+    <div class="avatar">SJ</div>
+  </div>
+</div>
+
+<main>
+
+  <!-- ============ SCREEN 1: DASHBOARD ============ -->
+  <section class="screen active" id="dashboard">
+    <div class="dash-header">
+      <div>
+        <div class="dash-greeting">Good afternoon, Sarah</div>
+        <div class="dash-sub">Digital Banking Revamp · Project Steering Committee</div>
+      </div>
+      <button class="btn btn-primary" onclick="goTo('capture')">+ Capture meeting</button>
+    </div>
+
+    <div class="status-row">
+      <div class="status-card green">
+        <div class="status-num">12</div>
+        <div class="status-label">Meetings logged</div>
+      </div>
+      <div class="status-card amber">
+        <div class="status-num">3</div>
+        <div class="status-label">Decisions changed</div>
+      </div>
+      <div class="status-card red">
+        <div class="status-num">1</div>
+        <div class="status-label">Unresolved issue</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <span>Recent meetings</span>
+        <span style="font-size:12px; color:var(--text-dim); font-weight:400; cursor:pointer;">View all →</span>
+      </div>
+
+      <div class="meeting-row" onclick="goTo('summary')">
+        <div class="meeting-date"><span>AUG</span><b>15</b></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Weekly Project Steering Committee</div>
+          <div class="meeting-meta">Sarah, Ahmad, John · 3 decisions extracted</div>
+        </div>
+        <div class="meeting-flag" style="background:var(--amber-dim); color:var(--amber);">Fields changed</div>
+      </div>
+
+      <div class="meeting-row" onclick="goTo('memory')">
+        <div class="meeting-date"><span>JUL</span><b>28</b></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Vendor Integration Review</div>
+          <div class="meeting-meta">Sarah, Ahmad · 2 decisions extracted</div>
+        </div>
+        <div class="meeting-flag" style="background:var(--green-dim); color:var(--green);">Stable</div>
+      </div>
+
+      <div class="meeting-row">
+        <div class="meeting-date"><span>JUL</span><b>15</b></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Compliance Sync</div>
+          <div class="meeting-meta">John, Sarah · 1 decision extracted</div>
+        </div>
+        <div class="meeting-flag" style="background:var(--green-dim); color:var(--green);">Stable</div>
+      </div>
+
+      <div class="meeting-row">
+        <div class="meeting-date"><span>JUN</span><b>30</b></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Kickoff — Digital Banking Revamp</div>
+          <div class="meeting-meta">Sarah, Ahmad, John · baseline values set</div>
+        </div>
+        <div class="meeting-flag" style="background:var(--surface-2); color:var(--text-dim);">Baseline</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN 2: MEETING CAPTURE ============ -->
+  <section class="screen" id="capture">
+    <div class="dash-greeting" style="font-size:20px; margin-bottom:6px;">Weekly Project Steering Committee</div>
+    <div class="dash-sub" style="margin-bottom:22px;">Press record — MeetMind captures audio and visual evidence automatically. Nothing to upload separately.</div>
+
+    <div class="capture-grid">
+      <div class="card">
+        <div class="section-title" style="margin-bottom:12px;">Participants</div>
+        <div id="participantList">
+          <div class="participant-chip"><div class="chip-avatar">S</div>Sarah — PM<span class="chip-remove" onclick="this.parentElement.remove()">✕</span></div>
+          <div class="participant-chip"><div class="chip-avatar">A</div>Ahmad — Eng. Lead<span class="chip-remove" onclick="this.parentElement.remove()">✕</span></div>
+          <div class="participant-chip"><div class="chip-avatar">J</div>John — Compliance<span class="chip-remove" onclick="this.parentElement.remove()">✕</span></div>
+        </div>
+
+        <div id="addMemberForm" class="add-member-form" style="display:none;">
+          <input type="text" id="newMemberName" class="mini-input" placeholder="Name">
+          <input type="text" id="newMemberRole" class="mini-input" placeholder="Role (e.g. Product Designer)">
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-primary" style="padding:8px 14px; font-size:12.5px; flex:1;" onclick="addMember()">Add</button>
+            <button class="btn btn-ghost" style="padding:8px 14px; font-size:12.5px; flex:1;" onclick="toggleAddMember(false)">Cancel</button>
+          </div>
+        </div>
+        <button class="btn btn-ghost add-member-btn" id="addMemberBtn" onclick="toggleAddMember(true)">+ Add member</button>
+      </div>
+
+      <div class="card recorder-card">
+
+        <!-- IDLE -->
+        <div id="stateIdle" class="capture-state">
+          <div class="recorder-frame">
+            <div class="camera-icon">🎥</div>
+            <div class="recorder-hint">Camera &amp; mic ready. Whiteboards and slides in frame will be detected automatically once you record.</div>
+          </div>
+          <button class="btn btn-primary record-btn" onclick="startRecording()">● Record meeting</button>
+        </div>
+
+        <!-- RECORDING -->
+        <div id="stateRecording" class="capture-state" style="display:none;">
+          <div class="preview-box" id="previewBox">
+            <div class="rec-overlay"><span class="rec-dot"></span> REC <span class="mono" id="recTimer">00:00</span></div>
+            <div class="preview-placeholder">🎥<span>Live camera preview</span></div>
+            <div class="scan-badge">🔍 Scanning frame for whiteboard / slides…</div>
+          </div>
+
+          <div class="capture-meta">
+            <div class="waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="frame-counter">🖼 <span id="frameCount">0</span> visual frame<span id="frameCountPlural">s</span> captured</div>
+          </div>
+
+          <div class="detect-toast" id="detectToast"></div>
+
+          <div class="recorder-hint">Recording audio and video together — whiteboards or slides that come into frame are detected and captured automatically, no separate upload needed.</div>
+          <button class="btn btn-ghost end-btn" onclick="stopRecording()">■ End meeting</button>
+        </div>
+
+        <!-- PROCESSING -->
+        <div id="stateProcessing" class="capture-state" style="display:none;">
+          <div class="processing-frame">
+            <div class="processing-header"><span class="pulse-mini"></span> MeetMind is analysing your meeting</div>
+            <div id="checklist" class="checklist"></div>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="progress-pct mono" id="progressPct">0%</div>
+          </div>
+        </div>
+
+        <!-- PROCESSED -->
+        <div id="stateProcessed" class="capture-state" style="display:none;">
+          <div class="processed-frame">
+            <div class="processed-header"><span class="processed-check">✓</span> Meeting processed</div>
+            <div class="intel-grid" style="margin-bottom:22px;">
+              <div class="intel-stat"><div class="intel-num">3</div><div class="intel-label">Decisions</div></div>
+              <div class="intel-stat"><div class="intel-num">3</div><div class="intel-label">Actions</div></div>
+              <div class="intel-stat"><div class="intel-num">1</div><div class="intel-label">Visual evidence</div></div>
+              <div class="intel-stat amber"><div class="intel-num">3</div><div class="intel-label">Fields changed</div></div>
+            </div>
+            <button class="btn btn-primary" style="width:100%;" onclick="goTo('summary')">View summary →</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN 3: MEETING SUMMARY ============ -->
+  <section class="screen" id="summary">
+    <div class="eyebrow" style="color:var(--amber);">AI Summary</div>
+    <div class="dash-greeting" style="font-size:20px; margin:8px 0 18px;">Weekly Project Steering Committee — 15 Aug</div>
+
+    <div class="card" style="margin-bottom:18px;">
+      <div class="section-title">🧠 Meeting Intelligence</div>
+      <div class="intel-grid">
+        <div class="intel-stat"><div class="intel-num">3</div><div class="intel-label">Decisions</div></div>
+        <div class="intel-stat"><div class="intel-num">3</div><div class="intel-label">Actions</div></div>
+        <div class="intel-stat"><div class="intel-num">1</div><div class="intel-label">Visual evidence</div></div>
+        <div class="intel-stat amber"><div class="intel-num">3</div><div class="intel-label">Fields changed</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Executive summary</div>
+      <p style="font-size:13.5px; line-height:1.7; color:var(--text-dim);">
+        The vendor requested five additional delivery days, pushing launch from 10 August to 15 August.
+        Ahmad confirmed the delay adds RM20,000 to integration costs, raising the total budget from
+        RM50,000 to RM70,000. John confirmed compliance has reviewed the change and the team may proceed.
+        Ownership of the launch workstream moves from Ahmad to Sarah for the remaining rollout.
+      </p>
+
+      <div class="field-callouts">
+        <div class="callout">
+          <div class="callout-label">Deadline</div>
+          <div class="callout-value">15 Aug</div>
+        </div>
+        <div class="callout">
+          <div class="callout-label">Budget</div>
+          <div class="callout-value">RM70,000</div>
+        </div>
+        <div class="callout">
+          <div class="callout-label">Owner</div>
+          <div class="callout-value">Sarah</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="card">
+        <div class="section-title">Key decisions</div>
+        <div class="decision-item"><span class="check">✓</span> Launch date moved to 15 August, approved by compliance</div>
+        <div class="decision-item"><span class="check">✓</span> Additional RM20,000 approved for integration work</div>
+        <div class="decision-item"><span class="check">✓</span> Sarah takes ownership of the launch workstream</div>
+      </div>
+      <div class="card">
+        <div class="section-title">Action items</div>
+        <div class="action-item"><span>Update proposal with new budget figures</span><span class="owner-tag">Sarah</span></div>
+        <div class="action-item"><span>Confirm vendor SLA under revised timeline</span><span class="owner-tag">Ahmad</span></div>
+        <div class="action-item"><span>File compliance sign-off memo</span><span class="owner-tag">John</span></div>
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; margin-top:18px;">
+      <button class="btn btn-ghost" onclick="goTo('memory')">View in Project Memory →</button>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN 4: PROJECT MEMORY (signature) ============ -->
+  <section class="screen" id="memory">
+    <div class="eyebrow" style="color:var(--amber);">🧠 Project Memory</div>
+    <div class="dash-greeting" style="font-size:20px; margin:8px 0 4px;">Digital Banking Revamp</div>
+    <div class="dash-sub" style="margin-bottom:22px;">One row per field, per meeting. Current state is the latest row — history is every row before it.</div>
+
+    <div class="memory-tabs">
+      <div class="mem-tab active" data-tab="current" onclick="setMemTab('current')">Current state</div>
+      <div class="mem-tab" data-tab="history" onclick="setMemTab('history')">History &amp; changes</div>
+    </div>
+
+    <!-- CURRENT STATE: latest value per field only -->
+    <div class="ledger" id="memCurrentView">
+
+      <div class="field-ledger">
+        <div class="fl-header"><div class="fl-title">Budget</div></div>
+        <div class="current-value-block" onclick="openDetail('budget')">
+          <div class="current-value mono">RM70,000</div>
+          <div class="current-badge changed">Changed 15 Aug</div>
+        </div>
+      </div>
+
+      <div class="field-ledger">
+        <div class="fl-header"><div class="fl-title">Deadline</div></div>
+        <div class="current-value-block" onclick="openDetail('deadline')">
+          <div class="current-value mono">15 Aug</div>
+          <div class="current-badge changed">Changed 15 Aug</div>
+        </div>
+      </div>
+
+      <div class="field-ledger">
+        <div class="fl-header"><div class="fl-title">Owner</div></div>
+        <div class="current-value-block" onclick="openDetail('owner')">
+          <div class="current-value mono">Sarah</div>
+          <div class="current-badge changed">Changed 15 Aug</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- HISTORY & CHANGES: full statement ledger -->
+    <div class="ledger" id="memHistoryView" style="display:none;">
+
+      <!-- BUDGET -->
+      <div class="field-ledger">
+        <div class="fl-header">
+          <div class="fl-title">Budget</div>
+          <div class="fl-current">RM70,000</div>
+        </div>
+
+        <div class="stmt-line changeable">
+          <div class="stmt-node changed"></div>
+          <div class="stmt-row" onclick="openDetail('budget')">
+            <div class="stmt-month">15 Aug</div>
+            <div class="stmt-value was">RM50,000</div>
+            <div class="stmt-value">RM70,000</div>
+          </div>
+        </div>
+        <div class="stmt-line">
+          <div class="stmt-node"></div>
+          <div class="stmt-row">
+            <div class="stmt-month">28 Jul</div>
+            <div class="stmt-value">RM50,000</div>
+          </div>
+        </div>
+        <div class="stmt-line">
+          <div class="stmt-node origin"></div>
+          <div class="stmt-row">
+            <div class="stmt-month">30 Jun · baseline</div>
+            <div class="stmt-value">RM50,000</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DEADLINE -->
+      <div class="field-ledger">
+        <div class="fl-header">
+          <div class="fl-title">Deadline</div>
+          <div class="fl-current">15 Aug</div>
+        </div>
+
+        <div class="stmt-line changeable">
+          <div class="stmt-node changed"></div>
+          <div class="stmt-row" onclick="openDetail('deadline')">
+            <div class="stmt-month">15 Aug</div>
+            <div class="stmt-value was">10 Aug</div>
+            <div class="stmt-value">15 Aug</div>
+          </div>
+        </div>
+        <div class="stmt-line">
+          <div class="stmt-node"></div>
+          <div class="stmt-row">
+            <div class="stmt-month">28 Jul</div>
+            <div class="stmt-value">10 Aug</div>
+          </div>
+        </div>
+        <div class="stmt-line">
+          <div class="stmt-node origin"></div>
+          <div class="stmt-row">
+            <div class="stmt-month">30 Jun · baseline</div>
+            <div class="stmt-value">10 Aug</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OWNER -->
+      <div class="field-ledger">
+        <div class="fl-header">
+          <div class="fl-title">Owner</div>
+          <div class="fl-current">Sarah</div>
+        </div>
+
+        <div class="stmt-line changeable">
+          <div class="stmt-node changed"></div>
+          <div class="stmt-row" onclick="openDetail('owner')">
+            <div class="stmt-month">15 Aug</div>
+            <div class="stmt-value was">Ahmad</div>
+            <div class="stmt-value">Sarah</div>
+          </div>
+        </div>
+        <div class="stmt-line">
+          <div class="stmt-node"></div>
+          <div class="stmt-row">
+            <div class="stmt-month">28 Jul</div>
+            <div class="stmt-value">Ahmad</div>
+          </div>
+        </div>
+        <div class="stmt-line">
+          <div class="stmt-node origin"></div>
+          <div class="stmt-row">
+            <div class="stmt-month">30 Jun · baseline</div>
+            <div class="stmt-value">Ahmad</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footnote" id="memFootnote">Click any card to see its evidence trail</div>
+  </section>
+
+  <!-- ============ SCREEN 5: AI SEARCH ============ -->
+  <section class="screen" id="search">
+    <div class="search-wrap">
+      <div class="search-hero">
+        <h2>Ask anything about your project</h2>
+        <p>Answers are grounded only in this project's meetings — every claim links back to its source.</p>
+      </div>
+
+      <div class="search-bar">
+        <span style="color:var(--text-faint);">🔍</span>
+        <input id="searchInput" type="text" placeholder="Why did the deadline change?" onkeydown="if(event.key==='Enter') runSearch()">
+        <button class="btn btn-primary" style="padding:8px 16px;" onclick="runSearch()">Ask</button>
+      </div>
+
+      <div class="suggest-row">
+        <div class="suggest-chip" onclick="quickAsk('What did the whiteboard show?')">What did the whiteboard show?</div>
+        <div class="suggest-chip" onclick="quickAsk('Why did the deadline change?')">Why did the deadline change?</div>
+        <div class="suggest-chip" onclick="quickAsk('Who owns the launch now?')">Who owns the launch now?</div>
+        <div class="suggest-chip" onclick="quickAsk('What did compliance say?')">What did compliance say?</div>
+      </div>
+
+      <div class="qa-block" id="qaBlock">
+        <div class="user-q"><span id="qaQuestion">What did the whiteboard show?</span></div>
+        <div class="ai-a">
+          <div class="ai-mark">🧠</div>
+          <div class="ai-a-text" id="qaAnswer">
+            MeetMind detected a whiteboard in frame during the 15 August recording and extracted the launch
+            date and budget directly from it. This wasn't uploaded separately — it was found automatically
+            while processing the meeting video.
+          </div>
+        </div>
+        <div id="evidenceArea"></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- ============ DETAIL PANEL (Project Memory drill-down) ============ -->
+<div class="detail-overlay" id="overlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detailPanel">
+  <button class="detail-close" onclick="closeDetail()">✕</button>
+  <div class="detail-eyebrow" id="dTitle">Budget changed</div>
+  <div class="detail-change" id="dChange">RM50,000 <span class="arrow">→</span> RM70,000</div>
+
+  <div class="detail-block">
+    <div class="detail-block-label">Why</div>
+    <div class="detail-block-value" id="dReason">Vendor requested five additional delivery days, increasing integration cost.</div>
+  </div>
+
+  <div class="detail-block">
+    <div class="detail-block-label">Meeting</div>
+    <div class="detail-block-value">Weekly Project Steering Committee — 15 August</div>
+  </div>
+
+  <div class="detail-block">
+    <div class="detail-block-label">Speaker</div>
+    <div class="detail-block-value">Ahmad, Engineering Lead</div>
+  </div>
+
+  <div class="detail-block">
+    <div class="detail-block-label">Evidence</div>
+    <div class="evidence-link">
+      <span>🗣</span>
+      <div>
+        <div style="font-size:12.5px; font-weight:500;">00:16:04 · transcript</div>
+        <div style="font-size:11.5px; color:var(--text-dim);">"This will increase the integration cost by RM20,000."</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- Navigation ----------
+  function goTo(screenId){
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.nav-tab[data-screen="${screenId}"]`).classList.add('active');
+    window.scrollTo({top:0, behavior:'smooth'});
+    if(screenId === 'capture'){ resetCapture(); }
+  }
+  document.querySelectorAll('.nav-tab').forEach(tab=>{
+    tab.addEventListener('click', ()=> goTo(tab.dataset.screen));
+  });
+
+  // ---------- Participants ----------
+  function toggleAddMember(show){
+    document.getElementById('addMemberForm').style.display = show ? 'flex' : 'none';
+    document.getElementById('addMemberBtn').style.display = show ? 'none' : 'block';
+    if(show){
+      document.getElementById('newMemberName').value = '';
+      document.getElementById('newMemberRole').value = '';
+      document.getElementById('newMemberName').focus();
+    }
+  }
+  function addMember(){
+    const name = document.getElementById('newMemberName').value.trim();
+    const role = document.getElementById('newMemberRole').value.trim() || 'Participant';
+    if(!name) return;
+    const initial = name.trim()[0].toUpperCase();
+    const chip = document.createElement('div');
+    chip.className = 'participant-chip';
+    chip.innerHTML = `<div class="chip-avatar">${initial}</div>${name} — ${role}<span class="chip-remove" onclick="this.parentElement.remove()">✕</span>`;
+    document.getElementById('participantList').appendChild(chip);
+    toggleAddMember(false);
+  }
+
+  // ---------- Capture: single-button record → auto-analyse flow ----------
+  let recordSeconds = 0;
+  let recordInterval = null;
+
+  function resetCapture(){
+    clearInterval(recordInterval);
+    recordSeconds = 0;
+    frameCount = 0;
+    document.getElementById('stateIdle').style.display = 'flex';
+    document.getElementById('stateRecording').style.display = 'none';
+    document.getElementById('stateProcessing').style.display = 'none';
+    document.getElementById('stateProcessed').style.display = 'none';
+    document.getElementById('recTimer').textContent = '00:00';
+    document.getElementById('frameCount').textContent = '0';
+    document.getElementById('checklist').innerHTML = '';
+    document.getElementById('progressFill').style.width = '0%';
+    document.getElementById('progressPct').textContent = '0%';
+    document.getElementById('detectToast').classList.remove('show');
+    document.getElementById('previewBox').classList.remove('flash');
+  }
+
+  let frameCount = 0;
+  const detectionSeconds = [4]; // demo timing: at 4s of (compressed) recording, a whiteboard comes into frame
+
+  function startRecording(){
+    document.getElementById('stateIdle').style.display = 'none';
+    document.getElementById('stateRecording').style.display = 'flex';
+    recordSeconds = 0;
+    frameCount = 0;
+    recordInterval = setInterval(()=>{
+      recordSeconds++;
+      const m = String(Math.floor(recordSeconds/60)).padStart(2,'0');
+      const s = String(recordSeconds%60).padStart(2,'0');
+      document.getElementById('recTimer').textContent = `${m}:${s}`;
+      if(detectionSeconds.includes(recordSeconds)){
+        detectFrame();
+      }
+    }, 1000);
+  }
+
+  function detectFrame(){
+    frameCount++;
+    document.getElementById('frameCount').textContent = frameCount;
+    document.getElementById('frameCountPlural').textContent = frameCount === 1 ? '' : 's';
+
+    const box = document.getElementById('previewBox');
+    box.classList.add('flash');
+    setTimeout(()=> box.classList.remove('flash'), 900);
+
+    const toast = document.getElementById('detectToast');
+    toast.textContent = '🖼 Whiteboard detected at 00:42 in the meeting — frame captured automatically';
+    toast.classList.add('show');
+    setTimeout(()=> toast.classList.remove('show'), 2600);
+  }
+
+  const checklistSteps = [
+    'Extracting conversation',
+    'Transcribing speakers',
+    'Scanning visual frames',
+    'Detecting whiteboard',
+    'Extracting slide information',
+    'Identifying decisions',
+    'Comparing with project history'
+  ];
+
+  function stopRecording(){
+    clearInterval(recordInterval);
+    document.getElementById('stateRecording').style.display = 'none';
+    document.getElementById('stateProcessing').style.display = 'block';
+
+    const list = document.getElementById('checklist');
+    list.innerHTML = '';
+    checklistSteps.forEach(step=>{
+      const row = document.createElement('div');
+      row.className = 'check-item';
+      row.innerHTML = `<span class="tick">✓</span><span>${step}</span>`;
+      list.appendChild(row);
+    });
+
+    const items = list.querySelectorAll('.check-item');
+    const fill = document.getElementById('progressFill');
+    const pct = document.getElementById('progressPct');
+
+    items.forEach((item, i)=>{
+      setTimeout(()=>{
+        item.classList.add('show');
+        const p = Math.round(((i+1)/items.length) * 100);
+        fill.style.width = p + '%';
+        pct.textContent = p + '%';
+        if(i === items.length - 1){
+          setTimeout(()=>{
+            document.getElementById('stateProcessing').style.display = 'none';
+            document.getElementById('stateProcessed').style.display = 'flex';
+          }, 700);
+        }
+      }, i * 420 + 300);
+    });
+  }
+
+  // ---------- Project Memory tabs ----------
+  function setMemTab(tab){
+    document.querySelectorAll('.mem-tab').forEach(t=>t.classList.remove('active'));
+    document.querySelector(`.mem-tab[data-tab="${tab}"]`).classList.add('active');
+    const showCurrent = tab === 'current';
+    document.getElementById('memCurrentView').style.display = showCurrent ? 'grid' : 'none';
+    document.getElementById('memHistoryView').style.display = showCurrent ? 'none' : 'grid';
+    document.getElementById('memFootnote').textContent = showCurrent
+      ? 'Click any field to see its evidence trail'
+      : 'Click any amber row to see its evidence trail';
+  }
+
+  // ---------- Project Memory detail panel ----------
+  const details = {
+    budget: {
+      title:'Budget changed',
+      change:'RM50,000 <span class="arrow">→</span> RM70,000',
+      reason:'Vendor requested five additional delivery days, increasing integration cost.',
+      quote:'"This will increase the integration cost by RM20,000."'
+    },
+    deadline: {
+      title:'Deadline changed',
+      change:'10 Aug <span class="arrow">→</span> 15 Aug',
+      reason:'Vendor requested additional delivery time to complete integration testing.',
+      quote:'"The vendor requested five additional days... moving the launch from 10 August to 15 August."'
+    },
+    owner: {
+      title:'Owner changed',
+      change:'Ahmad <span class="arrow">→</span> Sarah',
+      reason:'Sarah took ownership of the launch workstream for the remaining rollout.',
+      quote:'"Sarah will take ownership of the launch workstream going forward."'
+    }
+  };
+  function openDetail(field){
+    const d = details[field];
+    document.getElementById('dTitle').textContent = d.title;
+    document.getElementById('dChange').innerHTML = d.change;
+    document.getElementById('dReason').textContent = d.reason;
+    document.querySelector('.evidence-link div div:last-child').textContent = d.quote;
+    document.getElementById('detailPanel').classList.add('open');
+    document.getElementById('overlay').classList.add('open');
+  }
+  function closeDetail(){
+    document.getElementById('detailPanel').classList.remove('open');
+    document.getElementById('overlay').classList.remove('open');
+  }
+
+  // ---------- AI Search ----------
+  const answers = {
+    'Why did the deadline change?': {
+      type:'transcript',
+      a: 'The deadline moved from 10 August to 15 August because the vendor requested five additional delivery days. Ahmad confirmed this adds RM20,000 to the integration budget, and John confirmed compliance has reviewed and approved the change.',
+      meeting:'Digital Banking Revamp — 15 Aug', speaker:'Sarah', time:'00:14:32'
+    },
+    'Who owns the launch now?': {
+      type:'transcript',
+      a: 'Sarah now owns the launch workstream. Ownership moved from Ahmad to Sarah during the 15 August steering committee, alongside the deadline and budget updates.',
+      meeting:'Digital Banking Revamp — 15 Aug', speaker:'Sarah', time:'00:19:12'
+    },
+    'What did compliance say?': {
+      type:'transcript',
+      a: 'John confirmed compliance has reviewed the revised timeline and budget, and the team is clear to proceed with the 15 August launch date.',
+      meeting:'Digital Banking Revamp — 15 Aug', speaker:'John', time:'00:17:40'
+    },
+    'What did the whiteboard show?': {
+      type:'visual',
+      a: 'MeetMind detected a whiteboard in frame during the 15 August recording and extracted the launch date and budget directly from it. This wasn\'t uploaded separately — it was found automatically while processing the meeting video.',
+      launch:'15 August', budget:'RM70,000', detectedAt:'00:42'
+    }
+  };
+
+  function renderEvidence(match){
+    const area = document.getElementById('evidenceArea');
+    if(match.type === 'visual'){
+      area.innerHTML = `
+        <div class="visual-evidence-card" onclick="goTo('memory')">
+          <div class="ev-source">Visual evidence · auto-detected from recording</div>
+          <div class="ve-body">
+            <div class="ve-thumb">🖼️<span>WHITEBOARD</span></div>
+            <div class="ve-fields">
+              <div class="ve-field"><span class="ve-field-label">Launch date</span><span class="ve-field-value mono">${match.launch}</span></div>
+              <div class="ve-field"><span class="ve-field-label">Budget</span><span class="ve-field-value mono">${match.budget}</span></div>
+            </div>
+          </div>
+          <div class="ve-note">📎 Detected at ${match.detectedAt} in the recording — the user never uploaded this photo separately.</div>
+        </div>`;
+    } else {
+      area.innerHTML = `
+        <div class="evidence-card" onclick="goTo('memory')">
+          <div class="ev-source">Source</div>
+          <div class="ev-detail">
+            <span>📅 ${match.meeting}</span>
+            <span>🗣 ${match.speaker} — ${match.time}</span>
+          </div>
+        </div>`;
+    }
+  }
+
+  function quickAsk(q){
+    document.getElementById('searchInput').value = q;
+    runSearch();
+  }
+  function runSearch(){
+    const q = document.getElementById('searchInput').value.trim() || 'Why did the deadline change?';
+    const match = answers[q] || answers['Why did the deadline change?'];
+    document.getElementById('qaQuestion').textContent = q;
+    document.getElementById('qaAnswer').textContent = match.a;
+    renderEvidence(match);
+    document.getElementById('qaBlock').classList.remove('show');
+    void document.getElementById('qaBlock').offsetWidth;
+    document.getElementById('qaBlock').classList.add('show');
+  }
+  renderEvidence(answers['What did the whiteboard show?']);
+  document.getElementById('qaBlock').classList.add('show');
+</script>
+
+</body>
+</html>
