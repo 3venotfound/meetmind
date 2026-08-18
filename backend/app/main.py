@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.config import Settings, get_settings
 from app.database import Database
+from app.integrations import AIAdapter, CVAdapter
 from app.repositories import Repository
 from app.storage import RecordingStorage
 
@@ -24,6 +25,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.recording_storage = RecordingStorage(
             storage_root=app_settings.resolved_storage_root,
             max_upload_size_bytes=app_settings.max_upload_size_bytes,
+        )
+        application.state.ai_adapter = AIAdapter(
+            storage_root=app_settings.resolved_storage_root,
+            api_key=app_settings.gemini_api_key,
+            python_executable=app_settings.ai_python_executable,
+            timeout_seconds=app_settings.ai_timeout_seconds,
+        )
+        application.state.cv_adapter = CVAdapter(
+            storage_root=app_settings.resolved_storage_root,
+            python_executable=app_settings.cv_python_executable,
+            timeout_seconds=app_settings.cv_timeout_seconds,
         )
         yield
 
