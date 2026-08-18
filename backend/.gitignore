@@ -11,6 +11,15 @@ __pycache__/
 
 # Testing cache
 .pytest_cache/
+.coverage
+
+# Runtime database, uploads, and generated evidence
+storage/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
 # Editor settings
 .vscode/
