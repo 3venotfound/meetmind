@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_path: Path = Path("storage/meetmind.db")
     storage_root: Path = Path("storage")
+    max_upload_size_bytes: int = Field(default=524_288_000, gt=0)
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:5500"
 
     @property

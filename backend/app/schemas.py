@@ -100,3 +100,11 @@ class MeetingResponse(BaseModel):
     counts: MeetingCounts
     created_at: datetime
     updated_at: datetime
+
+
+class RecordingUploadResponse(BaseModel):
+    meeting_id: UUID
+    status: Literal["uploaded"]
+    original_filename: str
+    content_type: Literal["video/mp4", "video/webm"]
+    size_bytes: int

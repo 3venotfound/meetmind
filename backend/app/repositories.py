@@ -15,6 +15,14 @@ class DuplicateMeetingNumberError(Exception):
     pass
 
 
+class MeetingNotFoundError(Exception):
+    pass
+
+
+class RecordingAlreadyExistsError(Exception):
+    pass
+
+
 def utc_now_text() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -332,3 +340,37 @@ class Repository:
                 "participants": participants,
                 "counts": counts,
             }
+
+    def get_recording_state(self, meeting_id: str) -> dict | None:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT status, recording_path
+                FROM meetings
+                WHERE id = ?
+                """,
+                (meeting_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def mark_recording_uploaded(self, meeting_id: str, recording_path: str) -> None:
+        now = utc_now_text()
+        with self.database.transaction() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE meetings
+                SET recording_path = ?, status = 'uploaded', updated_at = ?
+                WHERE id = ? AND status = 'created' AND recording_path IS NULL
+                """,
+                (recording_path, now, meeting_id),
+            )
+            if cursor.rowcount == 1:
+                return
+
+            meeting_exists = connection.execute(
+                "SELECT 1 FROM meetings WHERE id = ?",
+                (meeting_id,),
+            ).fetchone()
+            if meeting_exists is None:
+                raise MeetingNotFoundError
+            raise RecordingAlreadyExistsError

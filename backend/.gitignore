@@ -15,6 +15,7 @@ __pycache__/
 
 # Runtime database, uploads, and generated evidence
 storage/
+.meetmind-test-*/
 *.db
 *.db-shm
 *.db-wal

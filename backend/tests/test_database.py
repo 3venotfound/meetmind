@@ -34,6 +34,7 @@ class DatabaseTests(unittest.TestCase):
             settings.resolved_storage_root,
             (BACKEND_DIR / "runtime-storage").resolve(),
         )
+        self.assertEqual(settings.max_upload_size_bytes, 524_288_000)
 
     def test_foreign_keys_are_enabled_for_every_connection(self) -> None:
         with self.database.connection() as connection:

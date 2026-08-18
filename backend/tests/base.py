@@ -4,17 +4,23 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.config import Settings
+from app.config import BACKEND_DIR, Settings
 from app.main import create_app
 
 
 class ApiTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.temporary_directory = tempfile.TemporaryDirectory(
+            prefix=".meetmind-test-",
+            dir=BACKEND_DIR,
+        )
         temporary_root = Path(self.temporary_directory.name)
+        self.temporary_root = temporary_root
+        self.storage_root = temporary_root / "storage"
         settings = Settings(
             database_path=temporary_root / "test.db",
-            storage_root=temporary_root / "storage",
+            storage_root=self.storage_root,
+            max_upload_size_bytes=32,
             cors_origins="http://testserver",
         )
         self.client_context = TestClient(create_app(settings))
@@ -32,5 +38,19 @@ class ApiTestCase(unittest.TestCase):
         }
         payload.update(overrides)
         response = self.client.post("/api/projects", json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def create_meeting(self, **overrides) -> dict:
+        project = self.create_project()
+        payload = {
+            "project_id": project["id"],
+            "title": "Recording test meeting",
+            "meeting_date": "2026-08-18",
+            "meeting_number": 1,
+            "participants": [],
+        }
+        payload.update(overrides)
+        response = self.client.post("/api/meetings", json=payload)
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()
