@@ -38,6 +38,17 @@ class ProjectStats(BaseModel):
     unresolved_issues: int
 
 
+class ProjectListItem(BaseModel):
+    id: UUID
+    name: str
+    client_org: str
+    target_industry: str | None
+    created_at: datetime
+    meeting_count: int
+    change_count: int
+    unresolved_action_count: int
+
+
 class CurrentMemoryValue(BaseModel):
     field_name: MemoryFieldName
     display_value: str

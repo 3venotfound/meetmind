@@ -24,9 +24,34 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertNotIn("detectFrame", FRONTEND)
 
     def test_camera_is_not_started_during_page_load(self):
-        load_call = FRONTEND.rfind("loadProject().catch")
+        load_call = FRONTEND.rfind("loadProjects().catch")
         self.assertGreater(load_call, 0)
         self.assertNotIn("startRecording()", FRONTEND[load_call:])
+
+    def test_multiple_project_dashboard_uses_real_api_data(self):
+        self.assertIn('state.projects=await api("/api/projects")', FRONTEND)
+        self.assertIn('id="createProjectForm"', FRONTEND)
+        self.assertIn('async function selectProject', FRONTEND)
+        self.assertIn("No projects yet", FRONTEND)
+        self.assertIn('method:"POST"', FRONTEND)
+        self.assertNotIn("Digital Banking Revamp", FRONTEND)
+        self.assertNotIn("FINOVA BANK", FRONTEND)
+
+    def test_only_selected_project_is_stored_in_local_storage(self):
+        self.assertIn('const PROJECT_KEY = "meetmind_project_id"', FRONTEND)
+        self.assertNotIn("LAST_MEETING_KEY", FRONTEND)
+        self.assertIn('localStorage.removeItem("meetmind_last_meeting_id")', FRONTEND)
+        storage_writes = [
+            line.strip() for line in FRONTEND.splitlines()
+            if "localStorage.setItem" in line
+        ]
+        self.assertTrue(storage_writes)
+        self.assertTrue(all("PROJECT_KEY" in line for line in storage_writes))
+
+    def test_selected_project_scopes_meetings_history_and_search(self):
+        self.assertIn("project_id:state.project.id", FRONTEND)
+        self.assertIn("/history`", FRONTEND)
+        self.assertIn("meeting.project_id!==state.project.id", FRONTEND)
 
     def test_processed_meeting_can_be_selected_without_a_hard_coded_uuid(self):
         self.assertIn('startupParams.get("project_id")', FRONTEND)

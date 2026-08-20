@@ -3,7 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.repositories import Repository
-from app.schemas import ProjectCreate, ProjectHistoryResponse, ProjectResponse
+from app.schemas import (
+    ProjectCreate,
+    ProjectHistoryResponse,
+    ProjectListItem,
+    ProjectResponse,
+)
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -16,6 +21,11 @@ def _repository(request: Request) -> Repository:
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(project: ProjectCreate, request: Request) -> dict:
     return _repository(request).create_project(project)
+
+
+@router.get("", response_model=list[ProjectListItem])
+def list_projects(request: Request) -> list[dict]:
+    return _repository(request).list_projects()
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

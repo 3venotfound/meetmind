@@ -61,6 +61,53 @@ class Repository:
             raise RuntimeError("Created project could not be retrieved")
         return result
 
+    def list_projects(self) -> list[dict]:
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    project.id,
+                    project.name,
+                    project.client_org,
+                    project.target_industry,
+                    project.created_at,
+                    (
+                        SELECT COUNT(*)
+                        FROM meetings AS meeting_count
+                        WHERE meeting_count.project_id = project.id
+                    ) AS meeting_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM changes AS change_count
+                        WHERE change_count.project_id = project.id
+                    ) AS change_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM action_items AS action
+                        JOIN meetings AS action_meeting
+                          ON action_meeting.id = action.meeting_id
+                        WHERE action_meeting.project_id = project.id
+                          AND action.status IN ('pending', 'in_progress')
+                    ) AS unresolved_action_count
+                FROM projects AS project
+                ORDER BY
+                    MAX(
+                        project.updated_at,
+                        COALESCE(
+                            (
+                                SELECT MAX(recent_meeting.updated_at)
+                                FROM meetings AS recent_meeting
+                                WHERE recent_meeting.project_id = project.id
+                            ),
+                            project.updated_at
+                        )
+                    ) DESC,
+                    project.created_at DESC,
+                    project.id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_project(self, project_id: str) -> dict | None:
         with self.database.connection() as connection:
             project = connection.execute(
