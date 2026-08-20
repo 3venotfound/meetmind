@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from app.config import BACKEND_DIR
+from app.integrations.cv_diagnostics import build_cv_diagnostic
 from app.integrations.errors import (
     IntegrationError,
     execution_failed,
@@ -23,6 +24,7 @@ from app.integrations.path_safety import (
 from app.integrations.schemas import (
     CVProcessingResult,
     CVVisualEvidence,
+    CVWorkerDiagnostic,
     RawCVPipelineResult,
 )
 from app.integrations.subprocess_runner import (
@@ -38,6 +40,16 @@ logger = logging.getLogger(__name__)
 CV_WORKER_PATH = Path(__file__).with_name("cv_worker.py")
 CV_RESULT_LIMIT_BYTES = 8 * 1024 * 1024
 DEPENDENCY_MISSING_EXIT_CODE = 20
+
+
+def _adapter_diagnostic(
+    error: BaseException,
+    stage: str,
+    category: str,
+) -> CVWorkerDiagnostic:
+    return CVWorkerDiagnostic.model_validate(
+        build_cv_diagnostic(error, stage, category)
+    )
 
 
 def normalize_timestamp(timestamp: str) -> int:
@@ -70,15 +82,30 @@ class CVAdapter:
         try:
             executable = resolve_python_executable(self.python_executable)
             safe_recording = validate_recording_path(recording_path, self.storage_root)
-        except WorkerLaunchError:
-            raise unavailable("cv") from None
-        except UnsafePathError:
-            raise unsafe_path("cv") from None
+        except WorkerLaunchError as error:
+            raise unavailable(
+                "cv",
+                diagnostic=_adapter_diagnostic(
+                    error, "cv_worker_bootstrap", "worker_unavailable"
+                ),
+            ) from None
+        except UnsafePathError as error:
+            raise unsafe_path(
+                "cv",
+                diagnostic=_adapter_diagnostic(
+                    error, "cv_worker_bootstrap", "unsafe_path"
+                ),
+            ) from None
 
         try:
             run = OwnedRunDirectory(self.integration_root, "cv")
-        except (OSError, UnsafePathError):
-            raise execution_failed("cv") from None
+        except (OSError, UnsafePathError) as error:
+            raise execution_failed(
+                "cv",
+                diagnostic=_adapter_diagnostic(
+                    error, "cv_worker_bootstrap", "io_error"
+                ),
+            ) from None
         keep_run = False
         request_path = run.path / "request.json"
         result_path = run.path / "result.json"
@@ -104,17 +131,41 @@ class CVAdapter:
                     cwd=run.path,
                     timeout_seconds=self.timeout_seconds,
                 )
-            except WorkerTimeoutError:
-                raise timed_out("cv") from None
-            except WorkerLaunchError:
-                raise unavailable("cv") from None
-            except Exception:
-                raise execution_failed("cv") from None
+            except WorkerTimeoutError as error:
+                raise timed_out(
+                    "cv",
+                    diagnostic=_adapter_diagnostic(
+                        error, "pipeline_execution", "timeout"
+                    ),
+                ) from None
+            except WorkerLaunchError as error:
+                raise unavailable(
+                    "cv",
+                    diagnostic=_adapter_diagnostic(
+                        error, "cv_worker_bootstrap", "worker_unavailable"
+                    ),
+                ) from None
+            except Exception as error:
+                raise execution_failed(
+                    "cv",
+                    diagnostic=_adapter_diagnostic(
+                        error, "cv_worker_bootstrap", "execution_failed"
+                    ),
+                ) from None
 
-            if process_result.returncode == DEPENDENCY_MISSING_EXIT_CODE:
-                raise unavailable("cv")
+            diagnostic = None
             if process_result.returncode != 0:
-                raise execution_failed("cv")
+                diagnostic = self._read_worker_diagnostic(result_path, run.path)
+                if diagnostic is None:
+                    diagnostic = _adapter_diagnostic(
+                        RuntimeError(),
+                        "cv_worker_bootstrap",
+                        "worker_exit_nonzero",
+                    )
+            if process_result.returncode == DEPENDENCY_MISSING_EXIT_CODE:
+                raise unavailable("cv", diagnostic=diagnostic)
+            if process_result.returncode != 0:
+                raise execution_failed("cv", diagnostic=diagnostic)
             try:
                 payload = read_result_json(
                     result_path,
@@ -143,26 +194,45 @@ class CVAdapter:
                     meeting_id=meeting_id,
                     visual_evidence=evidence,
                 )
-            except UnsafePathError:
-                raise unsafe_path("cv") from None
-            except (ValueError, ValidationError):
-                raise invalid_result("cv") from None
+            except UnsafePathError as error:
+                raise unsafe_path(
+                    "cv",
+                    diagnostic=_adapter_diagnostic(
+                        error, "result_validation", "unsafe_path"
+                    ),
+                ) from None
+            except (ValueError, ValidationError) as error:
+                raise invalid_result(
+                    "cv",
+                    diagnostic=_adapter_diagnostic(
+                        error, "result_validation", "invalid_result"
+                    ),
+                ) from None
 
             if evidence:
                 result._owned_run_directory = run
                 keep_run = True
             return result
         except IntegrationError as error:
+            self._log_diagnostic(error.diagnostic)
             logger.warning(
-                "CV integration ended with code=%s retryable=%s",
+                "CV integration ended with component=%s code=%s retryable=%s",
+                error.component,
                 error.code.value,
                 error.retryable,
             )
             raise
-        except (OSError, ValueError, UnsafePathError):
-            error = execution_failed("cv")
+        except (OSError, ValueError, UnsafePathError) as cause:
+            error = execution_failed(
+                "cv",
+                diagnostic=_adapter_diagnostic(
+                    cause, "cv_worker_bootstrap", "execution_failed"
+                ),
+            )
+            self._log_diagnostic(error.diagnostic)
             logger.warning(
-                "CV integration ended with code=%s retryable=%s",
+                "CV integration ended with component=%s code=%s retryable=%s",
+                error.component,
                 error.code.value,
                 error.retryable,
             )
@@ -173,6 +243,36 @@ class CVAdapter:
                     run.cleanup()
                 except (OSError, UnsafePathError):
                     logger.error("CV run-directory cleanup was refused or failed")
+
+    def _read_worker_diagnostic(
+        self,
+        result_path: Path,
+        run_directory: Path,
+    ) -> CVWorkerDiagnostic | None:
+        try:
+            payload = read_result_json(
+                result_path,
+                run_directory,
+                min(self.max_result_bytes, 4096),
+            )
+            return CVWorkerDiagnostic.model_validate(
+                payload.get("integration_diagnostic")
+            )
+        except (AttributeError, OSError, ValueError, ValidationError, UnsafePathError):
+            return None
+
+    @staticmethod
+    def _log_diagnostic(diagnostic: object | None) -> None:
+        if not isinstance(diagnostic, CVWorkerDiagnostic):
+            return
+        logger.warning(
+            "CV worker diagnostic component=%s stage=%s exception=%s category=%s message=%s",
+            diagnostic.component,
+            diagnostic.stage,
+            diagnostic.exception_class,
+            diagnostic.category,
+            diagnostic.message,
+        )
 
     def cleanup_validated_run(self, result: CVProcessingResult) -> None:
         """Phase 3B must copy evidence to permanent storage before calling this."""

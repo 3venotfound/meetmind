@@ -1,10 +1,16 @@
 """Child-process entry point. Do not import this module from FastAPI."""
 
 import json
+import importlib
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+try:
+    from app.integrations.cv_diagnostics import build_cv_diagnostic
+except ModuleNotFoundError:  # Direct worker execution uses this directory on sys.path.
+    from cv_diagnostics import build_cv_diagnostic
 
 
 DEPENDENCY_MISSING_EXIT_CODE = 20
@@ -51,7 +57,41 @@ def _write_result(path: Path, run_directory: Path, payload: Any) -> None:
     os.replace(temporary_path, path)
 
 
+def _failure_code_and_category(error: BaseException) -> tuple[int, str]:
+    if isinstance(error, ModuleNotFoundError):
+        return DEPENDENCY_MISSING_EXIT_CODE, "dependency_missing"
+    if isinstance(error, OSError):
+        return INVALID_REQUEST_EXIT_CODE, "io_error"
+    if isinstance(error, (KeyError, TypeError, ValueError, json.JSONDecodeError)):
+        return INVALID_REQUEST_EXIT_CODE, "invalid_request"
+    return EXECUTION_FAILED_EXIT_CODE, "execution_failed"
+
+
+def _try_write_diagnostic(
+    result_path: Path | None,
+    run_directory: Path | None,
+    error: BaseException,
+    stage: str,
+    category: str,
+) -> None:
+    if result_path is None or run_directory is None:
+        return
+    try:
+        _write_result(
+            result_path,
+            run_directory,
+            {"integration_diagnostic": build_cv_diagnostic(error, stage, category)},
+        )
+    except Exception:
+        # The adapter supplies a fixed bootstrap diagnostic if the worker cannot
+        # create its controlled result file. Never emit raw exception text.
+        return
+
+
 def main(arguments: list[str]) -> int:
+    stage = "cv_worker_bootstrap"
+    run_directory: Path | None = None
+    result_path: Path | None = None
     try:
         run_directory, request_path, result_path = _controlled_files(arguments)
         request = _load_request(request_path)
@@ -66,21 +106,32 @@ def main(arguments: list[str]) -> int:
 
         cv_directory = repository_directory / "cv"
         sys.path.insert(0, str(cv_directory))
-        import pipeline
+
+        stage = "ocr_initialization"
+        importlib.import_module("ocr_processor")
+
+        stage = "pipeline_import"
+        pipeline = importlib.import_module("pipeline")
 
         os.chdir(run_directory)
+        stage = "pipeline_execution"
         result = pipeline.process_meeting_video(
             str(recording_path),
             str(request["meeting_id"]),
         )
+        stage = "result_write"
         _write_result(result_path, run_directory, result)
         return 0
-    except ModuleNotFoundError:
-        return DEPENDENCY_MISSING_EXIT_CODE
-    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
-        return INVALID_REQUEST_EXIT_CODE
-    except Exception:
-        return EXECUTION_FAILED_EXIT_CODE
+    except Exception as error:
+        exit_code, category = _failure_code_and_category(error)
+        _try_write_diagnostic(
+            result_path,
+            run_directory,
+            error,
+            stage,
+            category,
+        )
+        return exit_code
 
 
 if __name__ == "__main__":

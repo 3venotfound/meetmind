@@ -89,6 +89,8 @@ def extract_frames(video_path: str, interval_seconds: float = 2.0, output_dir: s
     # If it doesn't exist yet, create it (and any missing parent folders).
     # exist_ok=True means "don't error out if the folder is already there".
     # ------------------------------------------------------------------
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
     os.makedirs(output_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -134,58 +136,63 @@ def extract_frames(video_path: str, interval_seconds: float = 2.0, output_dir: s
     extracted_frames = []          # this is what we'll return at the end
     current_time = 0.0             # start at the beginning of the video
 
-    while current_time <= duration_seconds:
+    try:
+        while current_time <= duration_seconds:
 
         # Work out which frame number corresponds to this point in time.
         # Example: at 4 seconds into a 30fps video, that's frame number 120.
-        frame_number = int(current_time * fps)
+            frame_number = int(current_time * fps)
 
         # If our calculated frame number has reached (or passed) the very
         # last real frame in the video, we're done - stop here instead of
         # trying to read a frame that doesn't exist. This is a normal,
         # expected situation at the end of every video (not an error), so
         # we quietly break instead of printing a scary warning.
-        if frame_number >= total_frame_count:
-            break
+            if frame_number >= total_frame_count:
+                break
 
         # Jump the video reader directly to that frame number.
-        video.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            video.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
 
         # Actually read the frame's image data.
         # success = True/False depending on whether the read worked.
         # frame_image = the actual pixel data (a NumPy array), or None if it failed.
-        success, frame_image = video.read()
+            success, frame_image = video.read()
 
-        if success:
+            if success and frame_image is not None:
             # Build a filename like "frame_00_42.jpg" using our helper function.
-            timestamp_str = format_timestamp(current_time)
-            frame_filename = f"frame_{timestamp_str}.jpg"
-            frame_path = os.path.join(output_dir, frame_filename)
+                timestamp_str = format_timestamp(current_time)
+                frame_filename = f"frame_{timestamp_str}.jpg"
+                frame_path = os.path.join(output_dir, frame_filename)
 
             # Save the image to disk as a .jpg file.
-            cv2.imwrite(frame_path, frame_image)
+                if not cv2.imwrite(frame_path, frame_image):
+                    raise IOError("Could not write extracted video frame")
 
             # Record what we just did, so later pipeline steps know
             # exactly which files exist and what timestamp each one is from.
-            extracted_frames.append({
-                "timestamp_seconds": round(current_time, 2),
-                "timestamp_str": timestamp_str,
-                "frame_path": frame_path,
-            })
-        else:
+                extracted_frames.append({
+                    "timestamp_seconds": round(current_time, 2),
+                    "timestamp_str": timestamp_str,
+                    "frame_path": frame_path,
+                })
+            else:
             # This can happen right at the very end of a video if our
             # calculated frame_number slightly overshoots the last real
             # frame. We just skip it rather than crashing the whole run.
-            print(f"[video_processor] Warning: could not read frame at {current_time:.1f}s - skipping.")
+                print(f"[video_processor] Warning: could not read frame at {current_time:.1f}s - skipping.")
 
         # Move forward to the next sample point.
-        current_time += interval_seconds
+            current_time += interval_seconds
+    finally:
+        video.release()
 
     # ------------------------------------------------------------------
     # STEP 5: Clean up - release the video file so it's not left locked
     # or held open in memory.
     # ------------------------------------------------------------------
-    video.release()
+    if total_frame_count > 0 and not extracted_frames:
+        raise IOError("Video opened but no frames could be decoded")
 
     print(f"[video_processor] Extracted {len(extracted_frames)} frames to '{output_dir}'")
 

@@ -4,9 +4,15 @@ from tests.base import ApiTestCase
 
 
 class ProjectRouteTests(ApiTestCase):
-    def test_removed_diagnostic_routes_return_404(self) -> None:
-        self.assertEqual(self.client.get("/").status_code, 404)
-        self.assertEqual(self.client.get("/health").status_code, 404)
+    def test_diagnostic_routes_are_available(self) -> None:
+        self.assertEqual(
+            self.client.get("/").json(),
+            {"message": "MeetMind API is running"},
+        )
+        self.assertEqual(
+            self.client.get("/health").json(),
+            {"status": "healthy"},
+        )
 
     def test_create_and_retrieve_project(self) -> None:
         created = self.create_project()

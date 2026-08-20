@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS decisions (
         field_name IN ('budget', 'deadline', 'owner', 'decision_text')
     ),
     field_value TEXT NOT NULL,
+    normalized_value TEXT,
     budget_amount_minor INTEGER,
     currency_code TEXT CHECK (currency_code IS NULL OR length(currency_code) = 3),
     decided_by TEXT,
@@ -154,6 +155,14 @@ class Database:
     def initialize(self) -> None:
         with self.connection() as connection:
             connection.executescript(SCHEMA_SQL)
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(decisions)").fetchall()
+            }
+            if "normalized_value" not in columns:
+                connection.execute(
+                    "ALTER TABLE decisions ADD COLUMN normalized_value TEXT"
+                )
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:

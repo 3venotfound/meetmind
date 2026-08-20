@@ -238,8 +238,7 @@ def detect_frames_with_visual_content(frame_list, min_area_ratio=0.15):
         image = cv2.imread(frame_info["frame_path"])
 
         if image is None:
-            print(f"[frame_detector] Warning: could not read {frame_info['frame_path']} - skipping.")
-            continue
+            raise IOError("Could not read an extracted frame for detection")
 
         detection = detect_visual_region(image, min_area_ratio=min_area_ratio)
 

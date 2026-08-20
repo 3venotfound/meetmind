@@ -171,15 +171,19 @@ if __name__ == "__main__":
     from frame_detector import detect_visual_region
 
     image = cv2.imread("tests/fake_whiteboard_photo.jpg")
+    if image is None:
+        raise IOError("Could not read manual-test image")
     detection = detect_visual_region(image)
 
     if detection["detected"]:
         corrected = correct_perspective(image, detection["corners"])
-        cv2.imwrite("tests/fake_whiteboard_corrected.jpg", corrected)
+        if not cv2.imwrite("tests/fake_whiteboard_corrected.jpg", corrected):
+            raise IOError("Could not write corrected manual-test image")
         print("Saved tests/fake_whiteboard_corrected.jpg")
 
         enhanced = enhance_for_ocr(corrected)
-        cv2.imwrite("tests/fake_whiteboard_enhanced.jpg", enhanced)
+        if not cv2.imwrite("tests/fake_whiteboard_enhanced.jpg", enhanced):
+            raise IOError("Could not write enhanced manual-test image")
         print("Saved tests/fake_whiteboard_enhanced.jpg")
     else:
         print("No region detected - nothing to correct.")

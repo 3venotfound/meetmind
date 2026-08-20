@@ -124,6 +124,8 @@ if __name__ == "__main__":
     ground_truth_text = "Launch Date: 15 August\nBudget: RM70,000"
 
     image = cv2.imread("tests/realistic_whiteboard_photo.jpg")
+    if image is None:
+        raise IOError("Could not read OCR manual-test image")
     detection = detect_visual_region(image)
     corrected = correct_perspective(image, detection["corners"])
     enhanced = enhance_for_ocr(corrected)

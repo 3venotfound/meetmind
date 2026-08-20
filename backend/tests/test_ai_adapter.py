@@ -118,6 +118,8 @@ class AIAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.secret, " ".join(call["command"]))
         self.assertNotIn(self.secret, json.dumps(runner.request_payload))
         self.assertEqual(call["environment"]["GEMINI_API_KEY"], self.secret)
+        self.assertEqual(call["environment"]["GEMINI_MODEL"], "gemini-3-flash-preview")
+        self.assertEqual(runner.request_payload["operation"], "extract_recording")
         run_root = self.storage_root / "integration_runs" / "ai"
         self.assertEqual(list(run_root.iterdir()), [])
 
@@ -140,6 +142,18 @@ class AIAdapterTests(unittest.IsolatedAsyncioTestCase):
             Path(sys.executable).resolve(),
         )
 
+    async def test_visual_context_is_included_in_the_single_recording_request(self):
+        runner = FakeRunner()
+        await self.adapter(runner).extract_recording(
+            self.recording_path,
+            visual_context="Slide: launch date 15 August",
+        )
+        self.assertEqual(
+            runner.request_payload["visual_context"],
+            "Slide: launch date 15 August",
+        )
+        self.assertEqual(len(runner.calls), 1)
+
     async def test_invalid_configured_executable_is_rejected_before_runner(self):
         runner = FakeRunner()
         adapter = self.adapter(
@@ -161,6 +175,7 @@ class AIAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(IntegrationError) as context:
             await adapter.extract_recording(self.recording_path)
         self.assertEqual(context.exception.code, IntegrationErrorCode.NOT_CONFIGURED)
+        self.assertEqual(context.exception.diagnostic.stage, "client_initialization")
         self.assertEqual(runner.calls, [])
 
     async def test_missing_dependency_is_sanitized(self):
@@ -170,11 +185,40 @@ class AIAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.exception.code, IntegrationErrorCode.UNAVAILABLE)
         self.assertNotIn(self.secret, str(context.exception))
 
+    async def test_worker_diagnostic_is_bounded_and_public_error_stays_sanitized(self):
+        payload = {
+            "integration_diagnostic": {
+                "component": "ai",
+                "stage": "generation",
+                "exception_class": "ClientError",
+                "status_code": 429,
+                "category": "resource_exhausted",
+                "message": "AI generation failed.",
+                "deletion_state": "succeeded",
+            }
+        }
+        runner = FakeRunner(payload=payload, returncode=21)
+        with self.assertLogs("app.integrations.ai_adapter", level="WARNING") as logs:
+            with self.assertRaises(IntegrationError) as context:
+                await self.adapter(runner).extract_recording(self.recording_path)
+        self.assertEqual(context.exception.code, IntegrationErrorCode.EXECUTION_FAILED)
+        self.assertEqual(str(context.exception), "AI processing failed")
+        self.assertEqual(context.exception.diagnostic.component, "ai")
+        self.assertEqual(context.exception.diagnostic.stage, "generation")
+        self.assertEqual(context.exception.diagnostic.deletion_state, "succeeded")
+        combined = "\n".join(logs.output)
+        self.assertIn("stage=generation", combined)
+        self.assertIn("status=429", combined)
+        self.assertNotIn(self.secret, combined)
+        self.assertNotIn(str(self.recording_path), combined)
+
     async def test_malformed_result_is_rejected(self):
         runner = FakeRunner(payload={"summary": "missing fields"})
         with self.assertRaises(IntegrationError) as context:
             await self.adapter(runner).extract_recording(self.recording_path)
         self.assertEqual(context.exception.code, IntegrationErrorCode.INVALID_RESULT)
+        self.assertEqual(context.exception.diagnostic.stage, "result_validation")
+        self.assertEqual(context.exception.diagnostic.deletion_state, "succeeded")
 
     async def test_missing_and_oversized_results_are_rejected(self):
         missing_runner = FakeRunner(payload=None)

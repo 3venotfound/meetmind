@@ -46,6 +46,77 @@ class AIExtractionResult(StrictIntegrationModel):
     budget: AIBudget
     deadline: AIDeadline
     owner: AIOwner
+    visual_extraction: "AITextExtractionResult | None" = None
+
+
+class AITextExtractionResult(StrictIntegrationModel):
+    summary: str
+    decisions: list[AIDecision]
+    action_items: list[AIActionItem]
+    budget: AIBudget
+    deadline: AIDeadline
+    owner: AIOwner
+
+
+AIExtractionResult.model_rebuild()
+
+
+class AIReasonResult(StrictIntegrationModel):
+    reason: str = Field(min_length=1)
+
+
+class AISearchEvidence(StrictIntegrationModel):
+    meeting_id: str
+    speaker: str | None
+    timestamp_seconds: int | None = Field(default=None, ge=0)
+    source_type: Literal["transcript", "visual"]
+
+
+class AISearchResult(StrictIntegrationModel):
+    answer: str = Field(min_length=1)
+    evidence: list[AISearchEvidence]
+
+
+class AIWorkerDiagnostic(StrictIntegrationModel):
+    component: Literal["ai"]
+    stage: Literal[
+        "worker_bootstrap",
+        "request_read",
+        "request_validation",
+        "module_discovery",
+        "module_import",
+        "client_initialization",
+        "recording_validation",
+        "upload",
+        "active_polling",
+        "generation",
+        "result_validation",
+        "result_serialization",
+        "result_write",
+        "remote_deletion",
+    ]
+    exception_class: str = Field(min_length=1, max_length=100)
+    status_code: int | str | None = None
+    category: str = Field(min_length=1, max_length=80)
+    message: str = Field(min_length=1, max_length=240)
+    deletion_state: Literal["succeeded", "failed", "not_applicable"]
+
+
+class CVWorkerDiagnostic(StrictIntegrationModel):
+    component: Literal["cv"]
+    stage: Literal[
+        "cv_worker_bootstrap",
+        "pipeline_import",
+        "ocr_initialization",
+        "video_open",
+        "video_decode",
+        "pipeline_execution",
+        "result_validation",
+        "result_write",
+    ]
+    exception_class: str = Field(min_length=1, max_length=100)
+    category: str = Field(min_length=1, max_length=80)
+    message: str = Field(min_length=1, max_length=240)
 
 
 class RawCVVisualEvidence(StrictIntegrationModel):

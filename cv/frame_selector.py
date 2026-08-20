@@ -73,11 +73,15 @@ def _crop_to_detection(frame_path, detection):
     README / commit message.
     """
     image = cv2.imread(frame_path)
+    if image is None:
+        raise IOError("Could not read frame for similarity comparison")
     xs = [point[0] for point in detection["corners"]]
     ys = [point[1] for point in detection["corners"]]
     x_min, x_max = max(min(xs), 0), min(max(xs), image.shape[1])
     y_min, y_max = max(min(ys), 0), min(max(ys), image.shape[0])
     cropped_bgr = image[y_min:y_max, x_min:x_max]
+    if cropped_bgr.size == 0:
+        raise ValueError("Detected frame crop is empty")
 
     # PIL (used by the imagehash library) expects RGB, but OpenCV loads
     # images as BGR - convert so colors aren't scrambled.

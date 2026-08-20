@@ -200,6 +200,57 @@ class CVAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(timeout.exception.code, IntegrationErrorCode.TIMEOUT)
 
+    async def test_worker_diagnostic_is_preserved_and_public_error_is_generic(self):
+        payload = {
+            "integration_diagnostic": {
+                "component": "cv",
+                "stage": "video_decode",
+                "exception_class": "OSError",
+                "category": "io_error",
+                "message": "Video frames could not be decoded.",
+            }
+        }
+        runner = FakeCVRunner(payload=payload, returncode=22)
+
+        with self.assertLogs("app.integrations.cv_adapter", level="WARNING") as logs:
+            with self.assertRaises(IntegrationError) as context:
+                await self.adapter(runner).process_recording(
+                    self.recording_path,
+                    self.meeting_id,
+                )
+
+        error = context.exception
+        self.assertEqual(error.code, IntegrationErrorCode.EXECUTION_FAILED)
+        self.assertEqual(str(error), "CV processing failed")
+        self.assertEqual(error.diagnostic.component, "cv")
+        self.assertEqual(error.diagnostic.stage, "video_decode")
+        self.assertEqual(error.diagnostic.category, "io_error")
+        combined = "\n".join(logs.output)
+        self.assertIn("component=cv", combined)
+        self.assertIn("stage=video_decode", combined)
+        self.assertNotIn(str(self.recording_path), combined)
+
+    async def test_missing_or_oversized_diagnostic_uses_safe_bootstrap_fallback(self):
+        oversized = {
+            "integration_diagnostic": {
+                "component": "cv",
+                "stage": "pipeline_execution",
+                "exception_class": "RuntimeError",
+                "category": "execution_failed",
+                "message": "x" * 5000,
+            }
+        }
+        for payload in (None, oversized):
+            with self.subTest(payload_present=payload is not None):
+                with self.assertRaises(IntegrationError) as context:
+                    await self.adapter(
+                        FakeCVRunner(payload=payload, returncode=21)
+                    ).process_recording(self.recording_path, self.meeting_id)
+                diagnostic = context.exception.diagnostic
+                self.assertEqual(diagnostic.component, "cv")
+                self.assertEqual(diagnostic.stage, "cv_worker_bootstrap")
+                self.assertEqual(diagnostic.category, "worker_exit_nonzero")
+
     async def test_cleanup_is_restricted_to_owned_run(self):
         sentinel = self.storage_root / "integration_runs" / "keep.txt"
         sentinel.parent.mkdir(parents=True)

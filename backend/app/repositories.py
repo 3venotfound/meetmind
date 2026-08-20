@@ -23,6 +23,12 @@ class RecordingAlreadyExistsError(Exception):
     pass
 
 
+class MeetingNotProcessableError(Exception):
+    def __init__(self, status: str):
+        self.status = status
+        super().__init__(status)
+
+
 def utc_now_text() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -288,7 +294,7 @@ class Repository:
                 """
                 SELECT
                     id, project_id, title, meeting_date, meeting_number,
-                    status, summary, created_at, updated_at
+                    status, transcript, summary, processing_error, created_at, updated_at
                 FROM meetings
                 WHERE id = ?
                 """,
@@ -335,10 +341,98 @@ class Repository:
                     (meeting_id,),
                 ).fetchone()[0],
             }
+            transcript_segments = [
+                dict(row) for row in connection.execute(
+                    """
+                    SELECT id, speaker, text, start_time_seconds
+                    FROM transcript_segments WHERE meeting_id = ? ORDER BY id
+                    """, (meeting_id,),
+                ).fetchall()
+            ]
+            tracked_values = [
+                {
+                    "field_name": row["field_name"],
+                    "raw_value": row["field_value"],
+                    "normalized_value": row["normalized_value"],
+                    "budget_amount_minor": row["budget_amount_minor"],
+                    "currency_code": row["currency_code"],
+                    "mentioned_by": row["decided_by"],
+                    "timestamp_seconds": row["timestamp_seconds"],
+                    "source_type": row["source_type"],
+                    "is_canonical": bool(row["is_canonical"]),
+                    "evidence_id": row["visual_evidence_id"],
+                }
+                for row in connection.execute(
+                    """
+                    SELECT field_name, field_value, normalized_value,
+                           budget_amount_minor, currency_code, decided_by,
+                           timestamp_seconds, source_type, is_canonical,
+                           visual_evidence_id
+                    FROM decisions
+                    WHERE meeting_id = ? AND field_name IN ('budget','deadline','owner')
+                    ORDER BY id
+                    """, (meeting_id,),
+                ).fetchall()
+            ]
+            decisions = [
+                {
+                    "id": row["id"], "text": row["field_value"],
+                    "decided_by": row["decided_by"],
+                    "timestamp_seconds": row["timestamp_seconds"],
+                    "source_type": row["source_type"],
+                    "evidence_id": row["visual_evidence_id"],
+                }
+                for row in connection.execute(
+                    """
+                    SELECT id, field_value, decided_by, timestamp_seconds,
+                           source_type, visual_evidence_id
+                    FROM decisions WHERE meeting_id = ? AND field_name = 'decision_text'
+                    ORDER BY id
+                    """, (meeting_id,),
+                ).fetchall()
+            ]
+            action_items = [
+                dict(row) for row in connection.execute(
+                    """
+                    SELECT id, description, owner, due_date, status
+                    FROM action_items WHERE meeting_id = ? ORDER BY id
+                    """, (meeting_id,),
+                ).fetchall()
+            ]
+            visual_evidence = [
+                {
+                    "id": row["id"], "timestamp_seconds": row["timestamp_seconds"],
+                    "evidence_type": row["evidence_type"], "text": row["raw_ocr_text"],
+                    "confidence": row["confidence"],
+                    "image_url": f"/api/evidence/{row['id']}/image",
+                }
+                for row in connection.execute(
+                    """
+                    SELECT id, timestamp_seconds, evidence_type, raw_ocr_text, confidence
+                    FROM visual_evidence WHERE meeting_id = ? ORDER BY timestamp_seconds, id
+                    """, (meeting_id,),
+                ).fetchall()
+            ]
+            changes = [
+                dict(row) for row in connection.execute(
+                    """
+                    SELECT id, field_name, old_value, new_value, reason, changed_by,
+                           source_type, timestamp_seconds, from_meeting_id,
+                           to_meeting_id, detected_at
+                    FROM changes WHERE to_meeting_id = ? ORDER BY id
+                    """, (meeting_id,),
+                ).fetchall()
+            ]
             return {
                 **dict(meeting),
                 "participants": participants,
                 "counts": counts,
+                "transcript_segments": transcript_segments,
+                "tracked_values": tracked_values,
+                "decisions": decisions,
+                "action_items": action_items,
+                "visual_evidence": visual_evidence,
+                "changes": changes,
             }
 
     def get_recording_state(self, meeting_id: str) -> dict | None:
@@ -374,3 +468,181 @@ class Repository:
             if meeting_exists is None:
                 raise MeetingNotFoundError
             raise RecordingAlreadyExistsError
+
+    def claim_processing(self, meeting_id: str) -> dict:
+        now = utc_now_text()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT id, project_id, meeting_date, status, recording_path FROM meetings WHERE id = ?",
+                (meeting_id,),
+            ).fetchone()
+            if row is None:
+                raise MeetingNotFoundError
+            if row["status"] != "uploaded" or not row["recording_path"]:
+                raise MeetingNotProcessableError(row["status"])
+            cursor = connection.execute(
+                """
+                UPDATE meetings SET status = 'processing', processing_error = NULL,
+                       updated_at = ? WHERE id = ? AND status = 'uploaded'
+                """, (now, meeting_id),
+            )
+            if cursor.rowcount != 1:
+                raise MeetingNotProcessableError("processing")
+            return dict(row)
+
+    def mark_processing_failed(self, meeting_id: str, safe_error: str) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                UPDATE meetings SET status = 'failed', processing_error = ?, updated_at = ?
+                WHERE id = ? AND status = 'processing'
+                """, (safe_error[:200], utc_now_text(), meeting_id),
+            )
+
+    def previous_canonical_values(self, project_id: str, meeting_id: str) -> dict[str, dict]:
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT d.*, m.meeting_date
+                FROM decisions d
+                JOIN meetings m ON m.id = d.meeting_id
+                JOIN meetings current ON current.id = ?
+                WHERE d.project_id = ? AND d.meeting_id <> ? AND d.is_canonical = 1
+                  AND d.field_name IN ('budget','deadline','owner')
+                  AND (m.meeting_date < current.meeting_date OR
+                       (m.meeting_date = current.meeting_date AND m.created_at < current.created_at))
+                ORDER BY m.meeting_date DESC, d.created_at DESC, d.id DESC
+                """, (meeting_id, project_id, meeting_id),
+            ).fetchall()
+        result = {}
+        for row in rows:
+            result.setdefault(row["field_name"], dict(row))
+        return result
+
+    def persist_processing(self, meeting_id: str, payload: dict) -> None:
+        now = utc_now_text()
+        with self.database.transaction() as connection:
+            state = connection.execute(
+                "SELECT status FROM meetings WHERE id = ?", (meeting_id,),
+            ).fetchone()
+            if state is None:
+                raise MeetingNotFoundError
+            if state["status"] != "processing":
+                raise MeetingNotProcessableError(state["status"])
+            connection.executemany(
+                """
+                INSERT INTO transcript_segments
+                    (meeting_id, speaker, text, start_time_seconds, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [(meeting_id, x["speaker"], x["text"], x.get("start_time_seconds"), now)
+                 for x in payload["transcript_segments"]],
+            )
+            connection.executemany(
+                """
+                INSERT INTO visual_evidence
+                    (id, meeting_id, timestamp_seconds, evidence_type, raw_ocr_text,
+                     confidence, image_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [(x["id"], meeting_id, x["timestamp_seconds"], x["evidence_type"],
+                  x["raw_ocr_text"], x["confidence"], x["image_path"], now)
+                 for x in payload["visual_evidence"]],
+            )
+            connection.executemany(
+                """
+                INSERT INTO decisions
+                    (project_id, meeting_id, field_name, field_value, normalized_value,
+                     budget_amount_minor, currency_code, decided_by, timestamp_seconds,
+                     source_type, reasoning_snippet, visual_evidence_id, is_canonical, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [(x["project_id"], meeting_id, x["field_name"], x["field_value"],
+                  x.get("normalized_value"), x.get("budget_amount_minor"), x.get("currency_code"),
+                  x.get("decided_by"), x.get("timestamp_seconds"), x["source_type"],
+                  x.get("reasoning_snippet"), x.get("visual_evidence_id"),
+                  int(x.get("is_canonical", False)), now) for x in payload["decisions"]],
+            )
+            connection.executemany(
+                """
+                INSERT INTO action_items
+                    (meeting_id, description, owner, due_date, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                [(meeting_id, x["description"], x["owner"], x.get("due_date"), now, now)
+                 for x in payload["action_items"]],
+            )
+            connection.executemany(
+                """
+                INSERT INTO changes
+                    (project_id, field_name, old_value, new_value,
+                     old_budget_amount_minor, new_budget_amount_minor, currency_code,
+                     from_meeting_id, to_meeting_id, reason, changed_by, source_type,
+                     timestamp_seconds, detected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [(x["project_id"], x["field_name"], x["old_value"], x["new_value"],
+                  x.get("old_budget_amount_minor"), x.get("new_budget_amount_minor"),
+                  x.get("currency_code"), x["from_meeting_id"], meeting_id,
+                  x.get("reason"), x.get("changed_by"), x["source_type"],
+                  x.get("timestamp_seconds"), now) for x in payload["changes"]],
+            )
+            cursor = connection.execute(
+                """
+                UPDATE meetings SET transcript = ?, summary = ?, status = 'processed',
+                       processing_error = NULL, updated_at = ?
+                WHERE id = ? AND status = 'processing'
+                """, (payload["transcript"], payload["summary"], now, meeting_id),
+            )
+            if cursor.rowcount != 1:
+                raise MeetingNotProcessableError("unknown")
+
+    def get_project_history(self, project_id: str) -> list[dict] | None:
+        with self.database.connection() as connection:
+            if connection.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+                return None
+            rows = connection.execute(
+                """
+                SELECT d.field_name, d.meeting_id, m.title AS meeting_title,
+                       m.meeting_date, d.field_value AS raw_value, d.normalized_value,
+                       d.budget_amount_minor, d.currency_code, d.source_type,
+                       d.decided_by AS speaker, d.timestamp_seconds,
+                       d.visual_evidence_id AS evidence_id, d.is_canonical,
+                       c.reason
+                FROM decisions d JOIN meetings m ON m.id = d.meeting_id
+                LEFT JOIN changes c ON c.to_meeting_id = d.meeting_id
+                                   AND c.field_name = d.field_name
+                WHERE d.project_id = ? AND d.field_name IN ('budget','deadline','owner')
+                ORDER BY m.meeting_date, d.created_at, d.id
+                """, (project_id,),
+            ).fetchall()
+        return [{**dict(row), "is_canonical": bool(row["is_canonical"]),
+                 "image_url": f"/api/evidence/{row['evidence_id']}/image" if row["evidence_id"] else None}
+                for row in rows]
+
+    def get_evidence_path(self, evidence_id: str) -> str | None:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT image_path FROM visual_evidence WHERE id = ?", (evidence_id,),
+            ).fetchone()
+        return row["image_path"] if row else None
+
+    def search_records(self, project_id: str) -> list[dict] | None:
+        with self.database.connection() as connection:
+            if connection.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+                return None
+            rows = connection.execute(
+                """
+                SELECT m.id AS meeting_id, m.title AS meeting_title, m.meeting_date,
+                       s.speaker, s.start_time_seconds AS timestamp_seconds,
+                       'transcript' AS source_type, s.text, NULL AS evidence_id
+                FROM transcript_segments s JOIN meetings m ON m.id = s.meeting_id
+                WHERE m.project_id = ?
+                UNION ALL
+                SELECT m.id, m.title, m.meeting_date, NULL, v.timestamp_seconds,
+                       'visual', v.raw_ocr_text, v.id
+                FROM visual_evidence v JOIN meetings m ON m.id = v.meeting_id
+                WHERE m.project_id = ?
+                """, (project_id, project_id),
+            ).fetchall()
+        return [dict(row) for row in rows]

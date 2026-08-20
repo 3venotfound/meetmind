@@ -81,7 +81,8 @@ def save_evidence(meeting_id, timestamp_str, region_type, corrected_image, ocr_r
 
     filename = f"{meeting_id}_{timestamp_str}_{region_type}.jpg"
     image_path = os.path.join(evidence_dir, filename)
-    cv2.imwrite(image_path, corrected_image)
+    if not cv2.imwrite(image_path, corrected_image):
+        raise IOError("Could not write visual evidence image")
 
     return {
         "timestamp": _timestamp_str_to_colon_format(timestamp_str),
@@ -101,6 +102,8 @@ if __name__ == "__main__":
     from ocr_processor import run_ocr
 
     image = cv2.imread("tests/realistic_whiteboard_photo.jpg")
+    if image is None:
+        raise IOError("Could not read evidence manual-test image")
     detection = detect_visual_region(image)
     corrected = correct_perspective(image, detection["corners"])
     region_type = classify_region_type(corrected)
