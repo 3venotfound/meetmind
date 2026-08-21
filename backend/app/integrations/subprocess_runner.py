@@ -1,6 +1,8 @@
 import asyncio
 import os
+import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol
@@ -79,6 +81,143 @@ async def _kill_and_wait(process: asyncio.subprocess.Process) -> None:
     await process.wait()
 
 
+class _ThreadedProcess:
+    """Run a child process without relying on event-loop subprocess support."""
+
+    def __init__(
+        self,
+        command: list[str],
+        *,
+        cwd: Path,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+        capture_limit_bytes: int,
+    ):
+        self.command = command
+        self.cwd = cwd
+        self.environment = environment
+        self.timeout_seconds = timeout_seconds
+        self.capture_limit_bytes = capture_limit_bytes
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen[bytes] | None = None
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+        with self._lock:
+            process = self._process
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+    def run(self) -> ProcessResult:
+        try:
+            process = subprocess.Popen(
+                self.command,
+                cwd=str(self.cwd),
+                env=dict(self.environment),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=False,
+            )
+        except (OSError, ValueError) as error:
+            raise WorkerLaunchError("Worker could not be started") from error
+
+        with self._lock:
+            self._process = process
+        if self._cancelled.is_set():
+            self.cancel()
+
+        stdout = bytearray()
+        stderr = bytearray()
+        truncated = {"stdout": False, "stderr": False}
+
+        def drain(stream, captured: bytearray, name: str) -> None:
+            if stream is None:
+                return
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    break
+                remaining = self.capture_limit_bytes - len(captured)
+                if remaining > 0:
+                    captured.extend(chunk[:remaining])
+                if len(chunk) > max(remaining, 0):
+                    truncated[name] = True
+
+        stdout_thread = threading.Thread(
+            target=drain,
+            args=(process.stdout, stdout, "stdout"),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=drain,
+            args=(process.stderr, stderr, "stderr"),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        timed_out = False
+        try:
+            process.wait(timeout=self.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+            process.wait()
+        finally:
+            stdout_thread.join()
+            stderr_thread.join()
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
+
+        if timed_out:
+            raise WorkerTimeoutError("Worker timed out")
+        return ProcessResult(
+            returncode=process.returncode if process.returncode is not None else -1,
+            stdout=bytes(stdout),
+            stderr=bytes(stderr),
+            stdout_truncated=truncated["stdout"],
+            stderr_truncated=truncated["stderr"],
+        )
+
+
+async def _run_threaded_subprocess(
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+    capture_limit_bytes: int,
+) -> ProcessResult:
+    controller = _ThreadedProcess(
+        command,
+        cwd=cwd,
+        environment=environment,
+        timeout_seconds=timeout_seconds,
+        capture_limit_bytes=capture_limit_bytes,
+    )
+    task = asyncio.create_task(asyncio.to_thread(controller.run))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        controller.cancel()
+        await asyncio.gather(asyncio.shield(task), return_exceptions=True)
+        raise
+
+
+def _needs_threaded_subprocess() -> bool:
+    return sys.platform == "win32"
+
+
 class SubprocessRunner:
     def __init__(self, capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES):
         if capture_limit_bytes < 1:
@@ -98,6 +237,14 @@ class SubprocessRunner:
         environment = os.environ.copy()
         if extra_environment:
             environment.update(extra_environment)
+        if _needs_threaded_subprocess():
+            return await _run_threaded_subprocess(
+                command,
+                cwd=cwd,
+                environment=environment,
+                timeout_seconds=timeout_seconds,
+                capture_limit_bytes=self.capture_limit_bytes,
+            )
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -105,6 +252,14 @@ class SubprocessRunner:
                 env=environment,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+            )
+        except NotImplementedError:
+            return await _run_threaded_subprocess(
+                command,
+                cwd=cwd,
+                environment=environment,
+                timeout_seconds=timeout_seconds,
+                capture_limit_bytes=self.capture_limit_bytes,
             )
         except (OSError, ValueError) as error:
             raise WorkerLaunchError("Worker could not be started") from error

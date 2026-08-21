@@ -12,7 +12,7 @@
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:18px;margin-bottom:15px}.stat b{font-size:28px;display:block}.row{display:flex;gap:12px;align-items:center;padding:13px 0;border-top:1px solid var(--line)}.row:first-child{border-top:0}.grow{flex:1}
     .btn{border:0;border-radius:9px;padding:10px 15px;font-weight:650;cursor:pointer}.btn:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--blue);color:#071120}.danger{background:var(--red);color:#1c0810}.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
     label{display:block;color:var(--muted);margin-bottom:5px}.field{margin-bottom:14px}input{width:100%;background:#091525;border:1px solid var(--line);border-radius:9px;padding:10px;color:var(--text)}.form-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px}.participant{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px}
-    video{width:100%;max-height:400px;background:#030812;border-radius:12px;object-fit:contain}.recording{outline:3px solid var(--red)}.status{padding:10px 12px;border-radius:9px;background:var(--panel2);margin:12px 0;color:var(--muted)}.status.error{color:#ffd2d7;border:1px solid #6a2633}.status.good{color:var(--green)}
+    video{width:100%;max-height:400px;background:#030812;border-radius:12px;object-fit:contain}.recording{outline:3px solid var(--red)}.status{padding:10px 12px;border-radius:9px;background:var(--panel2);margin:12px 0;color:var(--muted)}.status.error{color:#ffd2d7;border:1px solid #6a2633}.status.good{color:var(--green)}.mode-switch{display:flex;gap:8px;margin-bottom:15px}.upload-drop{border:1px dashed var(--line);border-radius:12px;padding:28px;text-align:center;background:#091525}.upload-drop input{margin:12px auto 0;max-width:480px}.file-meta{margin-top:15px;text-align:left}
     .two{display:grid;grid-template-columns:1.15fr .85fr;gap:15px}.chip{display:inline-block;padding:4px 8px;border-radius:99px;background:var(--panel2);color:var(--muted);margin:2px 4px 2px 0}.fact{padding:12px;border-left:3px solid var(--blue);background:#0a1728;margin:8px 0}.evidence{display:grid;grid-template-columns:140px 1fr;gap:12px;margin:10px 0}.evidence img{width:140px;height:90px;object-fit:cover;border-radius:8px}.history{border-left:2px solid var(--line);padding-left:16px}.answer{white-space:pre-wrap}.project-card{display:flex;flex-direction:column;min-height:190px}.project-card .btn{margin-top:auto;align-self:flex-start}.empty-state{text-align:center;padding:45px 20px}.hidden{display:none!important}
     @media(max-width:760px){header{padding:0 12px;gap:10px;overflow:auto}nav{gap:0}.project-pill{display:none}main{padding:18px}.grid,.two,.form-grid{grid-template-columns:1fr}.evidence{grid-template-columns:1fr}.evidence img{width:100%;height:auto}}
   </style>
@@ -60,13 +60,28 @@
 
   <section id="capture" class="screen">
     <div class="head"><div><h1>Capture a meeting</h1><p class="muted">Camera access starts only when you press Start camera.</p></div></div>
+    <div class="mode-switch" role="group" aria-label="Meeting recording source">
+      <button class="btn primary" id="recordMode">Record New Meeting</button>
+      <button class="btn secondary" id="uploadMode">Upload Existing Recording</button>
+    </div>
     <div class="two">
       <div class="card">
-        <video id="preview" autoplay muted playsinline></video>
+        <div id="recordPanel">
+          <video id="preview" autoplay muted playsinline></video>
+          <button class="btn primary" id="startRecording">Start camera & recording</button>
+          <button class="btn danger hidden" id="stopRecording">Stop & process</button>
+          <button class="btn secondary hidden" id="cancelRecording">Cancel</button>
+        </div>
+        <div id="uploadPanel" class="hidden">
+          <div class="upload-drop">
+            <h2>Choose an existing recording</h2>
+            <p class="muted">MP4 and WebM files only.</p>
+            <input id="existingRecording" type="file" accept=".mp4,.webm,video/mp4,video/webm">
+            <div id="selectedFileMeta" class="file-meta muted">No file selected.</div>
+          </div>
+          <button class="btn primary" id="uploadRecording" disabled>Upload & process recording</button>
+        </div>
         <div id="captureStatus" class="status">Ready. Add meeting details and participants.</div>
-        <button class="btn primary" id="startRecording">Start camera & recording</button>
-        <button class="btn danger hidden" id="stopRecording">Stop & process</button>
-        <button class="btn secondary hidden" id="cancelRecording">Cancel</button>
       </div>
       <div class="card">
         <div class="form-grid">
@@ -111,7 +126,7 @@
 <script>
 const API_BASE_URL = "http://127.0.0.1:8000";
 const PROJECT_KEY = "meetmind_project_id";
-const state = { projects: [], project: null, meeting: null, participants: [], stream: null, recorder: null, chunks: [], busy: false };
+const state = { projects: [], project: null, meeting: null, participants: [], stream: null, recorder: null, chunks: [], busy: false, captureMode: "record", selectedFile: null };
 const startupParams = new URLSearchParams(window.location.search);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const startupProjectId = startupParams.get("project_id");
@@ -126,6 +141,7 @@ function goTo(screen) {
   if(screen!=="projects" && !state.project) { showStatus("Choose or create a project first.","error"); screen="projects"; }
   document.querySelectorAll(".screen").forEach(x=>x.classList.toggle("active",x.id===screen));
   document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.screen===screen));
+  if(screen==="dashboard") refreshSelectedProject().catch(error=>showStatus(error.message,"error"));
   if(screen==="memory") loadHistory();
 }
 document.querySelectorAll("[data-screen]").forEach(x=>x.onclick=()=>goTo(x.dataset.screen));
@@ -138,6 +154,20 @@ async function api(path, options={}) {
   const payload = response.headers.get("content-type")?.includes("json") ? await response.json() : null;
   if(!response.ok) throw new Error(payload?.detail || `Request failed (${response.status})`);
   return payload;
+}
+
+async function refreshSelectedProject() {
+  if(!state.project) return;
+  const projectId=state.project.id;
+  const [project,projects]=await Promise.all([
+    api(`/api/projects/${projectId}`),
+    api("/api/projects"),
+  ]);
+  if(!state.project || state.project.id!==projectId) return;
+  state.project=project;
+  state.projects=projects;
+  renderDashboard(project);
+  renderProjectList();
 }
 
 function resetMeetingDisplay() {
@@ -214,6 +244,56 @@ function addParticipant(name="",role="") { state.participants.push({name,role});
 function renderParticipants(){ $("participants").innerHTML=state.participants.map((p,i)=>`<div class="participant"><input aria-label="Participant name" value="${escapeHtml(p.name)}" oninput="state.participants[${i}].name=this.value"><input aria-label="Participant role" value="${escapeHtml(p.role)}" oninput="state.participants[${i}].role=this.value"><button class="btn secondary" onclick="state.participants.splice(${i},1);renderParticipants()">Remove</button></div>`).join("") || '<p class="muted">Add the people attending this meeting.</p>'; }
 $("addParticipant").onclick=()=>addParticipant();
 
+const RECORDING_UPLOAD_TYPES = {".mp4":"video/mp4",".webm":"video/webm"};
+function formatFileSize(bytes){
+  if(bytes<1024) return `${bytes} bytes`;
+  if(bytes<1024*1024) return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/(1024*1024)).toFixed(1)} MB`;
+}
+function validateExistingRecording(file){
+  if(!file) throw new Error("Choose an MP4 or WebM recording first.");
+  if(file.size<=0) throw new Error("The selected recording is empty.");
+  const dot=file.name.lastIndexOf(".");
+  const extension=dot>=0?file.name.slice(dot).toLowerCase():"";
+  const expectedType=RECORDING_UPLOAD_TYPES[extension];
+  if(!expectedType) throw new Error("Only MP4 and WebM recordings are supported.");
+  const actualType=(file.type||"").split(";",1)[0].trim().toLowerCase();
+  if(actualType!==expectedType) throw new Error(`The selected ${extension.slice(1).toUpperCase()} file has an unsupported media type.`);
+  return new File([file],file.name,{type:expectedType,lastModified:file.lastModified});
+}
+function clearSelectedRecording(){
+  state.selectedFile=null;
+  $("existingRecording").value="";
+  $("selectedFileMeta").textContent="No file selected.";
+  $("uploadRecording").disabled=true;
+}
+function setCaptureMode(mode){
+  if(state.busy || state.recorder?.state==="recording") return;
+  state.captureMode=mode;
+  $("recordPanel").classList.toggle("hidden",mode!=="record");
+  $("uploadPanel").classList.toggle("hidden",mode!=="upload");
+  $("recordMode").className=`btn ${mode==="record"?"primary":"secondary"}`;
+  $("uploadMode").className=`btn ${mode==="upload"?"primary":"secondary"}`;
+  captureStatus(mode==="record"?"Ready to record. Add meeting details and participants.":"Choose an MP4 or WebM file, then add meeting details and participants.");
+}
+$("recordMode").onclick=()=>setCaptureMode("record");
+$("uploadMode").onclick=()=>setCaptureMode("upload");
+$("existingRecording").onchange=event=>{
+  const file=event.target.files?.[0];
+  state.selectedFile=null;
+  $("selectedFileMeta").textContent="No file selected.";
+  $("uploadRecording").disabled=true;
+  try {
+    state.selectedFile=validateExistingRecording(file);
+    $("selectedFileMeta").innerHTML=`<b>${escapeHtml(file.name)}</b><div>${formatFileSize(file.size)} · ${escapeHtml(state.selectedFile.type)}</div>`;
+    $("uploadRecording").disabled=false;
+    captureStatus("Recording selected. Ready to upload.","good");
+  } catch(error) {
+    event.target.value="";
+    captureStatus(error.message,"error");
+  }
+};
+
 function supportedRecorderType(){ return ["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm","video/mp4"].find(type=>window.MediaRecorder?.isTypeSupported(type)) || ""; }
 async function startRecording(){
   if(state.busy || state.recorder?.state==="recording") return;
@@ -227,24 +307,42 @@ async function startRecording(){
   } catch(error) { captureStatus(error.name==="NotAllowedError"?"Camera or microphone permission was denied. Allow access and try again.":"Could not start camera and microphone.","error"); stopTracks(); }
 }
 function stopTracks(){ state.stream?.getTracks().forEach(track=>track.stop()); state.stream=null; $("preview").srcObject=null; $("preview").classList.remove("recording"); }
-function setBusy(value){ state.busy=value; document.querySelectorAll("button").forEach(button=>{ if(button.id!=="switchProject") button.disabled=value; }); }
+function setBusy(value){ state.busy=value; document.querySelectorAll("button").forEach(button=>{ if(button.id!=="switchProject") button.disabled=value; }); if(!value) $("uploadRecording").disabled=!state.selectedFile; }
 function stopRecording(){ if(state.recorder?.state==="recording"){ setBusy(true); captureStatus("Finalizing recording…"); state.recorder.stop(); stopTracks(); } }
 function cancelRecording(){ if(state.recorder?.state==="recording") { state.recorder.onstop=null; state.recorder.stop(); } state.chunks=[]; stopTracks(); $("startRecording").classList.remove("hidden"); $("stopRecording").classList.add("hidden"); $("cancelRecording").classList.add("hidden"); captureStatus("Recording cancelled."); }
 $("startRecording").onclick=startRecording; $("stopRecording").onclick=stopRecording; $("cancelRecording").onclick=cancelRecording;
 
-async function finishRecording(){
-  try {
-    const title=$("meetingTitle").value.trim(); if(!title) throw new Error("Meeting title is required.");
-    const cleanParticipants=state.participants.map(p=>({name:p.name.trim(),role:p.role.trim()||null})).filter(p=>p.name); if(!cleanParticipants.length) throw new Error("Add at least one participant.");
-    const recordedType=state.recorder.mimeType || state.chunks[0]?.type || "video/webm"; const isMp4=recordedType.startsWith("video/mp4"); const mimeType=isMp4?"video/mp4":"video/webm"; const extension=isMp4?"mp4":"webm";
-    const blob=new Blob(state.chunks,{type:mimeType}); if(!blob.size) throw new Error("The recording is empty. Please record again.");
+function meetingRequest(){
+  if(!state.project) throw new Error("Choose a project first.");
+  const title=$("meetingTitle").value.trim(); if(!title) throw new Error("Meeting title is required.");
+  const cleanParticipants=state.participants.map(p=>({name:p.name.trim(),role:p.role.trim()||null})).filter(p=>p.name); if(!cleanParticipants.length) throw new Error("Add at least one participant.");
+  return {project_id:state.project.id,title,meeting_date:$("meetingDate").value,meeting_number:Number($("meetingNumber").value)||null,participants:cleanParticipants};
+}
+async function createUploadAndProcess(file){
     captureStatus("Creating meeting…");
-    const meeting=await api("/api/meetings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project_id:state.project.id,title,meeting_date:$("meetingDate").value,meeting_number:Number($("meetingNumber").value)||null,participants:cleanParticipants})});
-    captureStatus("Uploading recording…"); const form=new FormData(); form.append("file",new File([blob],`meeting.${extension}`,{type:mimeType})); await api(`/api/meetings/${meeting.id}/recording`,{method:"POST",body:form});
+    const meeting=await api("/api/meetings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(meetingRequest())});
+    captureStatus(`Uploading ${file.name} (${formatFileSize(file.size)})…`); const form=new FormData(); form.append("file",file); await api(`/api/meetings/${meeting.id}/recording`,{method:"POST",body:form});
     captureStatus("Running Gemini and visual evidence processing. This may take several minutes…"); await api(`/api/meetings/${meeting.id}/process`,{method:"POST"});
     captureStatus("Processing complete.","good"); await loadMeeting(meeting.id); state.project=await api(`/api/projects/${state.project.id}`); state.projects=await api("/api/projects"); renderDashboard(state.project); renderProjectList(); await loadHistory(); goTo("summary");
+}
+async function finishRecording(){
+  try {
+    const recordedType=state.recorder.mimeType || state.chunks[0]?.type || "video/webm"; const isMp4=recordedType.startsWith("video/mp4"); const mimeType=isMp4?"video/mp4":"video/webm"; const extension=isMp4?"mp4":"webm";
+    const blob=new Blob(state.chunks,{type:mimeType}); if(!blob.size) throw new Error("The recording is empty. Please record again.");
+    await createUploadAndProcess(new File([blob],`meeting.${extension}`,{type:mimeType}));
   } finally { state.chunks=[]; setBusy(false); $("startRecording").classList.remove("hidden"); $("stopRecording").classList.add("hidden"); $("cancelRecording").classList.add("hidden"); }
 }
+
+$("uploadRecording").onclick=async()=>{
+  if(state.busy) return;
+  try {
+    const file=validateExistingRecording(state.selectedFile);
+    setBusy(true);
+    await createUploadAndProcess(file);
+    clearSelectedRecording();
+  } catch(error) { captureStatus(error.message,"error"); }
+  finally { setBusy(false); }
+};
 
 async function loadMeeting(id){
   const meeting=await api(`/api/meetings/${id}`);

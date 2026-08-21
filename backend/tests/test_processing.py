@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from pathlib import Path
 from uuid import UUID
 
@@ -107,8 +108,8 @@ class FakeCV:
 
 
 class ProcessingRouteTests(ApiTestCase):
-    def uploaded_meeting(self):
-        meeting = self.create_meeting()
+    def uploaded_meeting(self, **overrides):
+        meeting = self.create_meeting(**overrides)
         response = self.client.post(
             f"/api/meetings/{meeting['id']}/recording",
             files={"file": ("meeting.webm", b"real-video", "video/webm")},
@@ -199,6 +200,34 @@ class ProcessingRouteTests(ApiTestCase):
         self.assertEqual(state["processing_error"], "execution_failed")
         self.assertEqual(state["counts"]["decisions"], 0)
 
+    def test_failed_meeting_retries_with_same_id_without_duplicate_results(self):
+        meeting = self.uploaded_meeting()
+        self.install_fakes(ai=FakeAI(fail=True), cv=FakeCV(self.storage_root))
+        failed = self.client.post(f"/api/meetings/{meeting['id']}/process")
+        self.assertEqual(failed.status_code, 500)
+
+        self.install_fakes()
+        retried = self.client.post(f"/api/meetings/{meeting['id']}/process")
+        self.assertEqual(retried.status_code, 200, retried.text)
+        result = retried.json()
+        self.assertEqual(result["id"], meeting["id"])
+        self.assertEqual(result["status"], "processed")
+        self.assertIsNone(result["processing_error"])
+        self.assertEqual(result["counts"]["decisions"], 5)
+        self.assertEqual(result["counts"]["visual_evidence"], 1)
+
+        with self.client.app.state.database.connection() as connection:
+            meeting_count = connection.execute(
+                "SELECT COUNT(*) FROM meetings WHERE id = ?",
+                (meeting["id"],),
+            ).fetchone()[0]
+            decision_count = connection.execute(
+                "SELECT COUNT(*) FROM decisions WHERE meeting_id = ?",
+                (meeting["id"],),
+            ).fetchone()[0]
+        self.assertEqual(meeting_count, 1)
+        self.assertEqual(decision_count, 5)
+
     def test_visual_only_value_is_canonical(self):
         meeting = self.uploaded_meeting()
         self.install_fakes(ai=FakeAI(spoken_budget=None))
@@ -244,6 +273,36 @@ class ProcessingRouteTests(ApiTestCase):
         self.assertTrue(search.json()["evidence"])
         self.assertTrue(all(item["meeting_id"] == meeting["id"] for item in search.json()["evidence"]))
         self.assertTrue(ai.search_records)
+
+    def test_processed_meeting_dated_today_appears_in_history_and_dashboard(self):
+        meeting = self.uploaded_meeting(meeting_date=date.today().isoformat())
+        self.install_fakes()
+        processed = self.client.post(f"/api/meetings/{meeting['id']}/process")
+        self.assertEqual(processed.status_code, 200, processed.text)
+
+        project_id = processed.json()["project_id"]
+        history = self.client.get(f"/api/projects/{project_id}/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        decision_entries = [
+            entry
+            for entry in history.json()["history"]
+            if entry["meeting_id"] == meeting["id"]
+            and entry["field_name"] == "decision_text"
+        ]
+        self.assertEqual(len(decision_entries), 1)
+        self.assertEqual(decision_entries[0]["raw_value"], "Proceed with launch")
+
+        detail = self.client.get(f"/api/projects/{project_id}").json()
+        self.assertEqual(detail["stats"]["meetings_logged"], 1)
+        self.assertEqual(detail["stats"]["unresolved_issues"], 1)
+        recent = next(item for item in detail["recent_meetings"] if item["id"] == meeting["id"])
+        self.assertEqual(recent["status"], "processed")
+        self.assertEqual(recent["decision_count"], 1)
+
+        listed = self.client.get("/api/projects").json()
+        project = next(item for item in listed if item["id"] == project_id)
+        self.assertEqual(project["meeting_count"], 1)
+        self.assertEqual(project["unresolved_action_count"], 1)
 
     def test_search_without_support_returns_required_message(self):
         project = self.create_project()

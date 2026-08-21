@@ -8,17 +8,28 @@ from uuid import uuid4
 from app.config import BACKEND_DIR
 from app.integrations.cv_adapter import CVAdapter, normalize_timestamp
 from app.integrations.errors import IntegrationError, IntegrationErrorCode
-from app.integrations.subprocess_runner import ProcessResult, WorkerTimeoutError
+from app.integrations.subprocess_runner import (
+    ProcessResult,
+    WorkerLaunchError,
+    WorkerTimeoutError,
+)
 
 
 AUTO_RESULT = object()
 
 
 class FakeCVRunner:
-    def __init__(self, payload=AUTO_RESULT, returncode=0, timeout=False):
+    def __init__(
+        self,
+        payload=AUTO_RESULT,
+        returncode=0,
+        timeout=False,
+        launch_error=False,
+    ):
         self.payload = payload
         self.returncode = returncode
         self.timeout = timeout
+        self.launch_error = launch_error
         self.calls = []
 
     async def run(
@@ -32,6 +43,8 @@ class FakeCVRunner:
         self.calls.append((command, cwd, timeout_seconds, extra_environment))
         if self.timeout:
             raise WorkerTimeoutError
+        if self.launch_error:
+            raise WorkerLaunchError("test launch failure")
         payload = self.payload
         if payload is AUTO_RESULT and self.returncode == 0:
             evidence_directory = cwd / "evidence"
@@ -179,6 +192,20 @@ class CVAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(oversized.exception.code, IntegrationErrorCode.INVALID_RESULT)
 
     async def test_subprocess_failure_and_timeout_are_sanitized(self):
+        with self.assertRaises(IntegrationError) as launch_failure:
+            await self.adapter(FakeCVRunner(launch_error=True)).process_recording(
+                self.recording_path,
+                self.meeting_id,
+            )
+        self.assertEqual(
+            launch_failure.exception.code,
+            IntegrationErrorCode.UNAVAILABLE,
+        )
+        self.assertEqual(
+            launch_failure.exception.diagnostic.category,
+            "worker_unavailable",
+        )
+
         with self.assertRaises(IntegrationError) as unavailable:
             await self.adapter(FakeCVRunner(payload=None, returncode=20)).process_recording(
                 self.recording_path,

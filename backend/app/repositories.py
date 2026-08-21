@@ -525,12 +525,13 @@ class Repository:
             ).fetchone()
             if row is None:
                 raise MeetingNotFoundError
-            if row["status"] != "uploaded" or not row["recording_path"]:
+            if row["status"] not in {"uploaded", "failed"} or not row["recording_path"]:
                 raise MeetingNotProcessableError(row["status"])
             cursor = connection.execute(
                 """
                 UPDATE meetings SET status = 'processing', processing_error = NULL,
-                       updated_at = ? WHERE id = ? AND status = 'uploaded'
+                       updated_at = ?
+                WHERE id = ? AND status IN ('uploaded', 'failed')
                 """, (now, meeting_id),
             )
             if cursor.rowcount != 1:
@@ -659,7 +660,7 @@ class Repository:
                 FROM decisions d JOIN meetings m ON m.id = d.meeting_id
                 LEFT JOIN changes c ON c.to_meeting_id = d.meeting_id
                                    AND c.field_name = d.field_name
-                WHERE d.project_id = ? AND d.field_name IN ('budget','deadline','owner')
+                WHERE d.project_id = ?
                 ORDER BY m.meeting_date, d.created_at, d.id
                 """, (project_id,),
             ).fetchall()
