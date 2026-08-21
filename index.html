@@ -124,7 +124,7 @@
   </section>
 </main>
 <script>
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = "https://meetmind-ux7u.onrender.com";
 const PROJECT_KEY = "meetmind_project_id";
 const state = { projects: [], project: null, meeting: null, participants: [], stream: null, recorder: null, chunks: [], busy: false, captureMode: "record", selectedFile: null };
 const startupParams = new URLSearchParams(window.location.search);
@@ -150,7 +150,7 @@ document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>goTo(x.dataset.g
 async function api(path, options={}) {
   let response;
   try { response = await fetch(`${API_BASE_URL}${path}`, options); }
-  catch { throw new Error("MeetMind backend is unavailable. Start FastAPI on port 8000."); }
+  catch { throw new Error("MeetMind backend is unavailable. The deployed API may be starting; try again shortly."); }
   const payload = response.headers.get("content-type")?.includes("json") ? await response.json() : null;
   if(!response.ok) throw new Error(payload?.detail || `Request failed (${response.status})`);
   return payload;

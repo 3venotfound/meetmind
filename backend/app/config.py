@@ -35,7 +35,11 @@ class Settings(BaseSettings):
     cv_timeout_seconds: float = Field(default=1800, gt=0)
     ai_python_executable: str = ""
     cv_python_executable: str = ""
-    cors_origins: str = "http://127.0.0.1:5500,http://localhost:5500"
+    cors_origins: str = (
+        "https://meetmiind.netlify.app,"
+        "http://127.0.0.1:5500,"
+        "http://localhost:5500"
+    )
 
     @property
     def resolved_database_path(self) -> Path:

@@ -21,7 +21,10 @@ class ApiTestCase(unittest.TestCase):
             database_path=temporary_root / "test.db",
             storage_root=self.storage_root,
             max_upload_size_bytes=32,
-            cors_origins="http://testserver",
+            cors_origins=(
+                "http://testserver,https://meetmiind.netlify.app,"
+                "http://127.0.0.1:5500,http://localhost:5500"
+            ),
         )
         self.client_context = TestClient(create_app(settings))
         self.client = self.client_context.__enter__()

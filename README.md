@@ -66,7 +66,29 @@ Set-Location frontend
 ```
 
 Open <http://127.0.0.1:5500>. The configured CORS origins cover both
-`127.0.0.1:5500` and `localhost:5500`.
+`127.0.0.1:5500` and `localhost:5500`. The tracked frontend is configured to
+send API requests to the deployed Render API at
+<https://meetmind-ux7u.onrender.com>; use local Swagger when testing the local
+backend directly.
+
+## Render and Netlify
+
+Render must use `backend` as its root directory so the existing module layout
+and requirements file are found. The compatible start command is:
+
+```text
+python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Set this Render environment variable without a trailing slash on any origin:
+
+```dotenv
+CORS_ORIGINS=https://meetmiind.netlify.app,http://127.0.0.1:5500,http://localhost:5500
+```
+
+Netlify can publish the repository root (`index.html`) or the `frontend`
+directory. Both tracked entrypoints use the same deployed API base URL. The
+deployed frontend is <https://meetmiind.netlify.app/>.
 
 ## Tests
 

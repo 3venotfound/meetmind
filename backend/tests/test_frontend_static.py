@@ -2,12 +2,14 @@ import unittest
 from pathlib import Path
 
 
-FRONTEND = (Path(__file__).resolve().parents[2] / "frontend" / "index.html").read_text(encoding="utf-8")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND = (REPOSITORY_ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+NETLIFY_ENTRYPOINT = (REPOSITORY_ROOT / "index.html").read_text(encoding="utf-8")
+RENDER_API_URL = "https://meetmind-ux7u.onrender.com"
 
 
 class FrontendStaticTests(unittest.TestCase):
     def test_real_recording_and_required_routes_are_present(self):
-        self.assertIn('const API_BASE_URL = "http://127.0.0.1:8000"', FRONTEND)
         self.assertIn("navigator.mediaDevices.getUserMedia", FRONTEND)
         self.assertIn("new MediaRecorder", FRONTEND)
         self.assertIn('form.append("file"', FRONTEND)
@@ -16,6 +18,17 @@ class FrontendStaticTests(unittest.TestCase):
             "/history", "/api/search",
         ):
             self.assertIn(route, FRONTEND)
+
+    def test_all_frontend_entrypoints_use_one_render_api_base_url(self):
+        self.assertEqual(FRONTEND, NETLIFY_ENTRYPOINT)
+        for source in (FRONTEND, NETLIFY_ENTRYPOINT):
+            self.assertEqual(
+                source.count(f'const API_BASE_URL = "{RENDER_API_URL}"'),
+                1,
+            )
+            self.assertIn("fetch(`${API_BASE_URL}${path}`, options)", source)
+            self.assertNotIn("http://127.0.0.1:8000", source)
+            self.assertNotIn("http://localhost:8000", source)
 
     def test_existing_recording_upload_uses_the_same_secure_flow(self):
         self.assertIn("Record New Meeting", FRONTEND)

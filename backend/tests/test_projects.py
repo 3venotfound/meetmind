@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.config import Settings
 from tests.base import ApiTestCase
 
 
@@ -191,3 +192,27 @@ class ProjectRouteTests(ApiTestCase):
             response.headers["access-control-allow-origin"],
             "http://testserver",
         )
+
+    def test_deployed_and_local_frontend_cors_origins_are_allowed(self) -> None:
+        expected_origins = {
+            "https://meetmiind.netlify.app",
+            "http://127.0.0.1:5500",
+            "http://localhost:5500",
+        }
+        configured_default = Settings.model_fields["cors_origins"].default
+        self.assertTrue(expected_origins.issubset(set(configured_default.split(","))))
+
+        for origin in expected_origins:
+            with self.subTest(origin=origin):
+                response = self.client.options(
+                    "/api/projects",
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": "GET",
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(
+                    response.headers["access-control-allow-origin"],
+                    origin,
+                )
