@@ -13,5 +13,3 @@ PyYAML==6.0.3
 scikit-image==0.24.0
 scipy==1.14.1
 Shapely==2.0.6
-torch==2.5.1
-torchvision==0.20.1
