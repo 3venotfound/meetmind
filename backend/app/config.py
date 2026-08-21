@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +27,15 @@ class Settings(BaseSettings):
     database_path: Path = Path("storage/meetmind.db")
     storage_root: Path = Path("storage")
     max_upload_size_bytes: int = Field(default=524_288_000, gt=0)
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:5500"
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-3-flash-preview"
+    gemini_file_timeout_seconds: float = Field(default=300, gt=0)
+    gemini_file_poll_interval_seconds: float = Field(default=2, gt=0)
+    ai_timeout_seconds: float = Field(default=900, gt=0)
+    cv_timeout_seconds: float = Field(default=1800, gt=0)
+    ai_python_executable: str = ""
+    cv_python_executable: str = ""
+    cors_origins: str = "http://127.0.0.1:5500,http://localhost:5500"
 
     @property
     def resolved_database_path(self) -> Path:

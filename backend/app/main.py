@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.config import Settings, get_settings
 from app.database import Database
+from app.integrations import AIAdapter, CVAdapter
 from app.repositories import Repository
+from app.processing import ProcessingService
 from app.storage import RecordingStorage
 
 
@@ -25,6 +27,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             storage_root=app_settings.resolved_storage_root,
             max_upload_size_bytes=app_settings.max_upload_size_bytes,
         )
+        application.state.ai_adapter = AIAdapter(
+            storage_root=app_settings.resolved_storage_root,
+            api_key=app_settings.gemini_api_key,
+            model=app_settings.gemini_model,
+            file_timeout_seconds=app_settings.gemini_file_timeout_seconds,
+            file_poll_interval_seconds=app_settings.gemini_file_poll_interval_seconds,
+            python_executable=app_settings.ai_python_executable,
+            timeout_seconds=app_settings.ai_timeout_seconds,
+        )
+        application.state.cv_adapter = CVAdapter(
+            storage_root=app_settings.resolved_storage_root,
+            python_executable=app_settings.cv_python_executable,
+            timeout_seconds=app_settings.cv_timeout_seconds,
+        )
+        application.state.processing_service = ProcessingService(
+            application.state.repository,
+            application.state.ai_adapter,
+            application.state.cv_adapter,
+            app_settings.resolved_storage_root,
+        )
         yield
 
     application = FastAPI(title=app_settings.app_name, lifespan=lifespan)
@@ -37,6 +59,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(api_router)
+
+    @application.get("/")
+    def read_root():
+        return {"message": "MeetMind API is running"}
+
+    @application.get("/health")
+    def health_check():
+        return {"status": "healthy"}
 
     return application
 

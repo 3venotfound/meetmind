@@ -94,6 +94,8 @@ def process_meeting_video(video_path, meeting_id, interval_seconds=2.0):
     for frame_info in unique_frames:
         import cv2  # local import keeps this file's top readable; cv2 is only needed here
         original_image = cv2.imread(frame_info["frame_path"])
+        if original_image is None:
+            raise IOError("Could not read an extracted frame")
         detection = frame_info["detection"]
 
         try:

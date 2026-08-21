@@ -10,6 +10,7 @@ from app.repositories import (
     MeetingNotFoundError,
     ProjectNotFoundError,
     RecordingAlreadyExistsError,
+    MeetingNotProcessableError,
     Repository,
 )
 from app.schemas import MeetingCreate, MeetingResponse, RecordingUploadResponse
@@ -85,6 +86,22 @@ def get_meeting(meeting_id: UUID, request: Request) -> dict:
     if meeting is None:
         raise HTTPException(status_code=404, detail="Meeting not found")
     return meeting
+
+
+@router.post("/{meeting_id}/process", response_model=MeetingResponse)
+async def process_meeting(meeting_id: UUID, request: Request) -> dict:
+    try:
+        return await request.app.state.processing_service.process(meeting_id)
+    except MeetingNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Meeting not found") from error
+    except MeetingNotProcessableError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Meeting cannot be processed while status is {error.status}",
+        ) from error
+    except Exception as error:
+        logger.error("Meeting processing request failed for %s", meeting_id)
+        raise HTTPException(status_code=500, detail="Meeting processing failed") from error
 
 
 @router.post(

@@ -1,13 +1,107 @@
 import os
 import re
 import json
+import mimetypes
+import time
+from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_FILE_TIMEOUT_SECONDS = 300.0
+DEFAULT_FILE_POLL_INTERVAL_SECONDS = 2.0
+SUPPORTED_RECORDING_MIME_TYPES = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+}
+DIAGNOSTIC_MESSAGE_LIMIT = 240
+_last_remote_deletion_state = "not_applicable"
+_DIAGNOSTIC_MESSAGES = {
+    "recording_validation": "AI recording input was invalid.",
+    "configuration": "AI client could not be initialized.",
+    "upload": "AI recording upload failed.",
+    "ACTIVE polling": "AI recording did not become ready.",
+    "generation": "AI generation failed.",
+    "deletion": "AI remote-file cleanup failed.",
+}
+_SAFE_PROVIDER_CATEGORIES = {
+    "ABORTED", "CANCELLED", "DEADLINE_EXCEEDED", "FAILED", "INTERNAL",
+    "INVALID_ARGUMENT", "NOT_FOUND", "PERMISSION_DENIED",
+    "RESOURCE_EXHAUSTED", "SERVICE_UNAVAILABLE", "UNAUTHENTICATED",
+    "UNAVAILABLE", "UNKNOWN",
+}
+
+
+def _safe_diagnostic(error: BaseException, stage: str) -> dict:
+    """Create a fixed-message diagnostic without reading exception text."""
+    status_code = getattr(error, "code", None)
+    response = getattr(error, "response", None)
+    if not isinstance(status_code, (int, str)):
+        status_code = getattr(response, "status_code", None)
+    if isinstance(status_code, str):
+        normalized_status = status_code.upper()
+        status_code = (
+            normalized_status
+            if normalized_status in _SAFE_PROVIDER_CATEGORIES
+            else None
+        )
+    elif not isinstance(status_code, int) or isinstance(status_code, bool):
+        status_code = None
+    raw_category = (
+        getattr(error, "status", None)
+        or getattr(error, "reason", None)
+        or type(error).__name__
+    )
+    normalized_category = str(raw_category).upper()
+    category = (
+        normalized_category
+        if normalized_category in _SAFE_PROVIDER_CATEGORIES
+        else type(error).__name__
+    )
+    return {
+        "stage": stage,
+        "exception_class": type(error).__name__[:100],
+        "status_code": status_code,
+        "provider_category": category[:80],
+        "message": _DIAGNOSTIC_MESSAGES.get(
+            stage,
+            "AI processing failed.",
+        )[:DIAGNOSTIC_MESSAGE_LIMIT],
+    }
+
+
+def _positive_float_setting(name: str, default: float) -> float:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    value = float(raw_value)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _gemini_model() -> str:
+    return os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+
+
+def _get_client():
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not configured")
+    return genai.Client(api_key=api_key)
+
+
+def _file_state_name(file_object) -> str:
+    state = getattr(file_object, "state", None)
+    if state is None:
+        return ""
+    name = getattr(state, "name", None)
+    if isinstance(name, str):
+        return name.upper()
+    return str(state).rsplit(".", 1)[-1].upper()
 
 _FIELDS = {
     "summary": {"type": "STRING"},
@@ -74,11 +168,25 @@ AUDIO_SCHEMA = {
     "required": ["transcript", "summary", "decisions", "action_items", "budget", "deadline", "owner"],
 }
 
+AUDIO_WITH_VISUAL_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "transcript": {"type": "STRING"},
+        **_FIELDS,
+        "visual_extraction": TEXT_SCHEMA,
+    },
+    "required": [
+        "transcript", "summary", "decisions", "action_items",
+        "budget", "deadline", "owner", "visual_extraction",
+    ],
+}
+
 _EXTRACTION_RULES = """
 Rules:
 - "decided_by" = the person who made or proposed the decision, not who merely confirmed/approved it.
 - "budget" value = the actual budget figure mentioned (not the delta/increase amount alone). If only a cost increase is mentioned without a base figure, state that in the summary and put the delta in "value" with a note that it's a delta, not a base figure.
-- Every "decided_by", "owner", and "mentioned_by" MUST be a speaker name that literally appears in the transcript — never invent, generalize ("the team"), or guess a name.
+- Every "decided_by" and "mentioned_by" MUST be a speaker name that literally appears in the transcript — never invent, generalize ("the team"), or guess a name.
+- An action-item "owner" may be a named assignee who did not speak. Preserve the explicitly stated spelling exactly, without inventing or replacing a name, and return it as a non-empty trimmed string.
 - If a field isn't mentioned at all, use null for its value — do not guess a plausible-sounding number or date.
 - decisions and action_items can be empty arrays if none exist.
 """
@@ -106,29 +214,36 @@ def _get_speakers(transcript_text: str) -> set[str]:
 def _validate(data: dict, speakers: set[str]) -> list[str]:
     """Returns a list of problems found — empty list means clean."""
     issues = []
-    if not speakers:
-        return issues  # nothing to validate against; skip silently
 
     def check(name, field_label):
-        if name and name not in speakers:
-            issues.append(f"{field_label} = '{name}' is not a speaker in this transcript")
+        if name is not None and name not in speakers:
+            issues.append(f"{field_label} is not a speaker in this transcript")
 
     for d in data.get("decisions", []):
         check(d.get("decided_by"), "decision.decided_by")
     for a in data.get("action_items", []):
-        check(a.get("owner"), "action_item.owner")
+        if "owner" not in a or a["owner"] is None:
+            continue
+        action_owner = a["owner"]
+        if (
+            not isinstance(action_owner, str)
+            or not action_owner.strip()
+            or action_owner != action_owner.strip()
+        ):
+            issues.append("action_item.owner must be a non-empty trimmed string")
     for field in ("budget", "deadline", "owner"):
         check(data.get(field, {}).get("mentioned_by"), f"{field}.mentioned_by")
 
     return issues
 
 
-def _generate_json(contents, schema, speakers_source: str, max_retries: int) -> dict:
+def _generate_json(contents, schema, speakers_source: str, max_retries: int, client=None) -> dict:
     """Shared call-and-validate loop used by both entry points below."""
+    active_client = client or _get_client()
     last_error = None
     for attempt in range(max_retries + 1):
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+        response = active_client.models.generate_content(
+            model=_gemini_model(),
             contents=contents,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -167,16 +282,140 @@ You are extracting structured meeting data from this transcript:
 {transcript_text}
 {_EXTRACTION_RULES}
 """
-    return _generate_json(prompt, TEXT_SCHEMA, speakers_source=transcript_text, max_retries=max_retries)
+    return _generate_json(
+        prompt,
+        TEXT_SCHEMA,
+        speakers_source=transcript_text,
+        max_retries=max_retries,
+    )
 
 
-def extract_from_audio(audio_path: str, max_retries: int = 1) -> dict:
+def extract_from_audio(
+    audio_path: str,
+    max_retries: int = 1,
+    file_timeout_seconds: float | None = None,
+    poll_interval_seconds: float | None = None,
+    visual_context: str | None = None,
+) -> dict:
     """
     Uploads an audio file and returns structured JSON (transcript + extraction)
     in a single Gemini call — Gemini does STT and extraction together.
     """
-    audio_file = client.files.upload(file=audio_path)
-    return _generate_json([AUDIO_PROMPT, audio_file], AUDIO_SCHEMA, speakers_source="audio", max_retries=max_retries)
+    global _last_remote_deletion_state
+    _last_remote_deletion_state = "not_applicable"
+    stage = "recording_validation"
+    active_client = None
+    uploaded_file = None
+    processing_error = None
+    try:
+        recording_path = Path(audio_path).expanduser().resolve(strict=True)
+        mime_type = SUPPORTED_RECORDING_MIME_TYPES.get(recording_path.suffix.lower())
+        if mime_type is None:
+            raise ValueError("Recording must be MP4 or WebM")
+        mimetypes.add_type(mime_type, recording_path.suffix.lower(), strict=True)
+        timeout_seconds = (
+            file_timeout_seconds
+            if file_timeout_seconds is not None
+            else _positive_float_setting(
+                "GEMINI_FILE_TIMEOUT_SECONDS",
+                DEFAULT_FILE_TIMEOUT_SECONDS,
+            )
+        )
+        interval_seconds = (
+            poll_interval_seconds
+            if poll_interval_seconds is not None
+            else _positive_float_setting(
+                "GEMINI_FILE_POLL_INTERVAL_SECONDS",
+                DEFAULT_FILE_POLL_INTERVAL_SECONDS,
+            )
+        )
+        if timeout_seconds <= 0 or interval_seconds <= 0:
+            raise ValueError("Gemini file timing settings must be positive")
+
+        stage = "configuration"
+        active_client = _get_client()
+        stage = "upload"
+        uploaded_file = active_client.files.upload(
+            file=str(recording_path),
+            config=types.UploadFileConfig(mime_type=mime_type),
+        )
+        deadline = time.monotonic() + timeout_seconds
+        stage = "ACTIVE polling"
+        while True:
+            state_name = _file_state_name(uploaded_file)
+            if state_name == "ACTIVE":
+                break
+            if state_name == "FAILED":
+                raise RuntimeError("Gemini file processing failed")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Gemini file processing timed out")
+            time.sleep(min(interval_seconds, remaining))
+            uploaded_file = active_client.files.get(name=uploaded_file.name)
+
+        stage = "generation"
+        prompt = AUDIO_PROMPT
+        schema = AUDIO_SCHEMA
+        if visual_context:
+            prompt += f"""
+
+The CV pipeline separately extracted this OCR text from slides or whiteboards:
+{visual_context[:50_000]}
+
+Also return `visual_extraction`, based ONLY on that OCR text. It must contain
+summary, decisions, action_items, budget, deadline, and owner. Keep visual
+decisions and action_items empty when the OCR does not identify a responsible
+speaker. Set mentioned_by to null because OCR does not establish who spoke.
+Do not mix visual-only facts into the spoken budget/deadline/owner fields.
+"""
+            schema = AUDIO_WITH_VISUAL_SCHEMA
+        return _generate_json(
+            [prompt, uploaded_file],
+            schema,
+            speakers_source="audio",
+            max_retries=max_retries,
+            client=active_client,
+        )
+    except BaseException as error:
+        processing_error = error
+        try:
+            error._meetmind_deletion_state = "not_applicable"
+        except Exception:
+            pass
+        try:
+            error._meetmind_diagnostic = _safe_diagnostic(error, stage)
+        except Exception:
+            pass
+        raise
+    finally:
+        remote_name = getattr(uploaded_file, "name", None)
+        if remote_name and active_client is not None:
+            try:
+                stage = "deletion"
+                active_client.files.delete(name=remote_name)
+                _last_remote_deletion_state = "succeeded"
+                if processing_error is not None:
+                    try:
+                        processing_error._meetmind_deletion_state = "succeeded"
+                    except Exception:
+                        pass
+            except Exception as deletion_error:
+                _last_remote_deletion_state = "failed"
+                if processing_error is not None:
+                    try:
+                        processing_error._meetmind_deletion_state = "failed"
+                    except Exception:
+                        pass
+                if processing_error is None:
+                    try:
+                        deletion_error._meetmind_diagnostic = _safe_diagnostic(
+                            deletion_error,
+                            stage,
+                        )
+                        deletion_error._meetmind_deletion_state = "failed"
+                    except Exception:
+                        pass
+                    raise
 
 def generate_change_reason(field_name: str, old_value: str, new_value: str, transcript_snippet: str) -> str:
     """
@@ -198,8 +437,8 @@ Relevant transcript segment:
 Task: Write ONE short sentence (max 20 words) explaining WHY this change happened, based only on the transcript segment above. Do not add information not present in the transcript. Return only the sentence, no extra text.
 """
 
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
+    response = _get_client().models.generate_content(
+        model=_gemini_model(),
         contents=prompt
     )
 
@@ -254,8 +493,8 @@ Instructions:
         "required": ["answer", "supporting_record_indices"]
     }
 
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
+    response = _get_client().models.generate_content(
+        model=_gemini_model(),
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
