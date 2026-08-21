@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 MeetingStatus = Literal["created", "uploaded", "processing", "processed", "failed"]
 MeetingState = Literal["baseline", "stable", "changed"]
 MemoryFieldName = Literal["budget", "deadline", "owner"]
+HistoryFieldName = Literal["budget", "deadline", "owner", "decision_text"]
 SourceType = Literal["transcript", "visual"]
 
 
@@ -190,7 +191,7 @@ class RecordingUploadResponse(BaseModel):
 
 
 class HistoryEntryResponse(BaseModel):
-    field_name: MemoryFieldName
+    field_name: HistoryFieldName
     meeting_id: UUID
     meeting_title: str
     meeting_date: date

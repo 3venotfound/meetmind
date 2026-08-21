@@ -17,6 +17,19 @@ class FrontendStaticTests(unittest.TestCase):
         ):
             self.assertIn(route, FRONTEND)
 
+    def test_existing_recording_upload_uses_the_same_secure_flow(self):
+        self.assertIn("Record New Meeting", FRONTEND)
+        self.assertIn("Upload Existing Recording", FRONTEND)
+        self.assertIn('accept=".mp4,.webm,video/mp4,video/webm"', FRONTEND)
+        self.assertIn('const RECORDING_UPLOAD_TYPES = {".mp4":"video/mp4",".webm":"video/webm"}', FRONTEND)
+        self.assertIn("if(file.size<=0)", FRONTEND)
+        self.assertIn("selectedFileMeta", FRONTEND)
+        self.assertIn("formatFileSize(file.size)", FRONTEND)
+        self.assertGreaterEqual(FRONTEND.count("createUploadAndProcess("), 3)
+        self.assertEqual(FRONTEND.count('api("/api/meetings",{method:"POST"'), 1)
+        self.assertEqual(FRONTEND.count('form.append("file",file)'), 1)
+        self.assertIn("if(state.busy) return", FRONTEND)
+
     def test_obsolete_simulation_is_absent(self):
         self.assertNotIn("fake processing", FRONTEND.lower())
         self.assertNotIn("setTimeout(() =>", FRONTEND)
@@ -36,6 +49,15 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn('method:"POST"', FRONTEND)
         self.assertNotIn("Digital Banking Revamp", FRONTEND)
         self.assertNotIn("FINOVA BANK", FRONTEND)
+
+    def test_revisiting_dashboard_refreshes_project_counts(self):
+        self.assertIn(
+            'if(screen==="dashboard") refreshSelectedProject()',
+            FRONTEND,
+        )
+        self.assertIn("async function refreshSelectedProject()", FRONTEND)
+        self.assertIn("api(`/api/projects/${projectId}`)", FRONTEND)
+        self.assertIn('api("/api/projects")', FRONTEND)
 
     def test_only_selected_project_is_stored_in_local_storage(self):
         self.assertIn('const PROJECT_KEY = "meetmind_project_id"', FRONTEND)

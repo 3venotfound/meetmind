@@ -76,6 +76,20 @@ class RecordingUploadTests(ApiTestCase):
         self.assertEqual(stored_path.read_bytes(), content)
         self.assert_no_part_files()
 
+    def test_browser_webm_mime_parameters_are_normalized(self) -> None:
+        meeting = self.create_meeting()
+        response = self.upload(
+            meeting["id"],
+            filename="browser-recording.webm",
+            content=b"browser webm recording",
+            content_type="video/webm;codecs=vp9,opus",
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["content_type"], "video/webm")
+        self.assertEqual(self.database_recording_state(meeting["id"])["status"], "uploaded")
+        self.assert_no_part_files()
+
     def test_unknown_meeting_returns_404(self) -> None:
         response = self.upload(str(uuid4()))
         self.assertEqual(response.status_code, 404)
